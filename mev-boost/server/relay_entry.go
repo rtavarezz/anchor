@@ -1,12 +1,12 @@
 package server
 
 import (
-	"bytes"
+	_ "bytes"
 	"net/url"
 	"strings"
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
-	"github.com/flashbots/go-boost-utils/utils"
+	_ "github.com/flashbots/go-boost-utils/utils"
 )
 
 // The point-at-infinity is 48 zero bytes.
@@ -42,20 +42,20 @@ func NewRelayEntry(relayURL string) (entry RelayEntry, err error) {
 	}
 
 	// Extract the relay's public key from the parsed URL.
-	if entry.URL.User.Username() == "" {
-		return entry, ErrMissingRelayPubkey
-	}
+	//if entry.URL.User.Username() == "" {
+	//	return entry, ErrMissingRelayPubkey
+	//}
 
 	// Convert the username string to a public key.
-	entry.PublicKey, err = utils.HexToPubkey(entry.URL.User.Username())
-	if err != nil {
-		return entry, err
-	}
+	//entry.PublicKey, err = utils.HexToPubkey(entry.URL.User.Username())
+	//if err != nil {
+	//	return entry, err
+	//}
 
 	// Check if the public key is the point-at-infinity.
-	if bytes.Equal(entry.PublicKey[:], pointAtInfinityPubkey[:]) {
-		return entry, ErrPointAtInfinityPubkey
-	}
+	//if bytes.Equal(entry.PublicKey[:], pointAtInfinityPubkey[:]) {
+	//	return entry, ErrPointAtInfinityPubkey
+	//}
 
 	return entry, nil
 }

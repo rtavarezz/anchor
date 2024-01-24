@@ -171,6 +171,14 @@ type bidResp struct {
 	relays   []RelayEntry
 }
 
+// opBidResp are entries in the bids cache for OP
+type opBidResp struct {
+	t        time.Time
+	response OPBid
+	bidInfo  bidInfo
+	relays   []RelayEntry
+}
+
 // bidRespKey is used as key for the bids cache
 type bidRespKey struct {
 	slot      uint64
