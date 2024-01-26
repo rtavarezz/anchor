@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	seqconsts "github.com/AnomalyFi/nodekit-seq/consts"
+	"github.com/ava-labs/avalanchego/ids"
+
+	"github.com/AnomalyFi/hypersdk/chain"
+	"github.com/AnomalyFi/hypersdk/crypto/ed25519"
+	"github.com/AnomalyFi/hypersdk/rpc"
+	"github.com/AnomalyFi/hypersdk/utils"
+	"github.com/AnomalyFi/nodekit-seq/actions"
+	"github.com/AnomalyFi/nodekit-seq/auth"
+	"github.com/AnomalyFi/nodekit-seq/consts"
+	"github.com/AnomalyFi/nodekit-seq/genesis"
+
+	boostUtils "github.com/flashbots/go-boost-utils/utils"
+
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
@@ -24,7 +39,6 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/flashbots/go-boost-utils/ssz"
 	"github.com/flashbots/go-boost-utils/types"
-	"github.com/flashbots/go-boost-utils/utils"
 	"github.com/flashbots/go-utils/httplogger"
 	"github.com/flashbots/mev-boost/config"
 	"github.com/google/uuid"
@@ -97,8 +111,8 @@ type BoostService struct {
 	httpClientRegVal       http.Client
 	requestMaxRetries      int
 
-	bids     map[bidRespKey]bidResp // keeping track of bids, to log the originating relay on withholding
-	opBids     map[bidRespKey]opBidResp // keeping track of bids, to log the originating relay on withholding
+	bids     map[bidRespKey]bidResp   // keeping track of bids, to log the originating relay on withholding
+	opBids   map[bidRespKey]opBidResp // keeping track of bids, to log the originating relay on withholding
 	bidsLock sync.Mutex
 
 	slotUID     *slotUID
@@ -616,7 +630,7 @@ func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Re
 			}
 
 			// Ensure the response blockhash matches the response block
-			calculatedBlockHash, err := utils.ComputeBlockHash(&builderApi.VersionedExecutionPayload{
+			calculatedBlockHash, err := boostUtils.ComputeBlockHash(&builderApi.VersionedExecutionPayload{
 				Version: responsePayload.Version,
 				Capella: responsePayload.Capella,
 			}, nil)
@@ -842,7 +856,7 @@ func (m *BoostService) handleOPGetPayload(w http.ResponseWriter, req *http.Reque
 	}
 
 	// Prepare relay responses
-	result := opBidResp{}                           // the final response, containing the highest bid (if any)
+	result := opBidResp{}                         // the final response, containing the highest bid (if any)
 	relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
 
 	// Call the relays
@@ -881,7 +895,7 @@ func (m *BoostService) handleOPGetPayload(w http.ResponseWriter, req *http.Reque
 
 				// ignored fields:
 				// txRoot
-                // pubkey
+				// pubkey
 			}
 
 			if phase0.Hash32(responsePayload.Payload.BlockHash) == nilHash {
@@ -989,8 +1003,139 @@ func (m *BoostService) handleOPGetPayload(w http.ResponseWriter, req *http.Reque
 	m.opBids[bidKey] = result
 	m.bidsLock.Unlock()
 
+	//TODO fix this part
+	transactions := make([]*chain.Transaction, len(result.response.Payload.Transactions))
+
+	vm_id := uint64(1)
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, vm_id)
+
+	chainId := "dope"
+
+	for i, seqTx := range result.response.Payload.Transactions {
+		args := &SubmitMsgTxArgs{
+			ChainId:          chainId,
+			NetworkID:        1337,
+			SecondaryChainId: buf,
+			Data:             seqTx,
+		}
+
+		t, err := m.GetSEQTransaction(*args)
+		if err != nil {
+			log.Info("get SEQ transaction failed")
+			w.WriteHeader(http.StatusNoContent)
+		}
+		transactions[i] = t[0]
+	}
+
+	res := SEQResponse{
+		Hght:   uint64(result.response.Payload.BlockNumber),
+		Tmstmp: int64(result.response.Payload.Timestamp),
+		Prnt:   ids.ID(result.response.Payload.ParentHash),
+		Txs:    transactions,
+	}
+	//TODO make the payload here to return to HyperSDK
+
 	// Return the bid
-	m.respondOK(w, &result.response.Payload)
+	// m.respondOK(w, &result.response.Payload)
+	m.respondOK(w, res)
+}
+
+type SubmitMsgTxArgs struct {
+	ChainId          string `json:"chain_id"`
+	NetworkID        uint32 `json:"network_id"`
+	SecondaryChainId []byte `json:"secondary_chain_id"`
+	Data             []byte `json:"data"`
+}
+
+type SEQResponse struct {
+	Prnt   ids.ID `json:"parent"`
+	Tmstmp int64  `json:"timestamp"`
+	Hght   uint64 `json:"height"`
+
+	Txs []*chain.Transaction `json:"txs"`
+}
+
+func (m *BoostService) GetSEQTransaction(args SubmitMsgTxArgs) ([]*chain.Transaction, error) {
+
+	ctx := context.Background()
+
+	chainId, err := ids.FromString(args.ChainId)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint := "fun"
+
+	if err != nil {
+		fmt.Errorf("error with id from string", "err", err)
+	}
+
+	//tcli := trpc.NewJSONRPCClient(endpoint, 1337, chainId)
+
+	cli := rpc.NewJSONRPCClient(endpoint)
+
+	unitPrices, err := cli.UnitPrices(ctx, true)
+
+	if err != nil {
+		return nil, err
+	}
+
+	parser := m.ServerParser(ctx, args.NetworkID, chainId)
+
+	priv, err := ed25519.HexToKey(
+		"323b1d8f4eed5f0da9da93071b034f2dce9d2d22692c172f3cb252a64ddfafd01b057de320297c29ad0c1f589ea216869cf1938d88c9fbd70d6748323dbf2fa7", //nolint:lll
+	)
+	factory := auth.NewED25519Factory(priv)
+
+	tpriv, err := ed25519.GeneratePrivateKey()
+	if err != nil {
+		return nil, err
+	}
+
+	trsender := tpriv.PublicKey()
+	action := &actions.SequencerMsg{
+		FromAddress: trsender,
+		Data:        args.Data,
+		ChainId:     args.SecondaryChainId,
+	}
+
+	maxUnits, err := chain.EstimateMaxUnits(parser.Rules(time.Now().UnixMilli()), action, factory, nil)
+	if err != nil {
+		return nil, err
+	}
+	maxFee, err := chain.MulSum(unitPrices, maxUnits)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UnixMilli()
+	rules := parser.Rules(now)
+
+	base := &chain.Base{
+		Timestamp: utils.UnixRMilli(now, rules.GetValidityWindow()),
+		ChainID:   chainId,
+		MaxFee:    maxFee,
+	}
+
+	// Build transaction
+	actionRegistry, authRegistry := parser.Registry()
+	tx := chain.NewTx(base, nil, action, false)
+	tx, err = tx.Sign(factory, actionRegistry, authRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to sign transaction", err)
+	}
+
+	// TODO above is new!
+
+	if err := tx.AuthAsyncVerify()(); err != nil {
+		return nil, err
+	}
+
+	ret := []*chain.Transaction{tx}
+
+	return ret, nil
+
 }
 
 // CheckRelays sends a request to each one of the relays previously registered to get their status
@@ -1027,4 +1172,56 @@ func (m *BoostService) CheckRelays() int {
 	// At the end, wait for every routine and return status according to relay's ones.
 	wg.Wait()
 	return int(numSuccessRequestsToRelay)
+}
+
+var _ chain.Parser = (*ServerParser)(nil)
+
+type ServerParser struct {
+	networkID uint32
+	chainID   ids.ID
+	genesis   *genesis.Genesis
+}
+
+func (p *ServerParser) ChainID() ids.ID {
+	return p.chainID
+}
+
+func (p *ServerParser) Rules(t int64) chain.Rules {
+	return p.genesis.Rules(t, p.networkID, p.chainID)
+}
+
+func (*ServerParser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
+	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
+}
+
+func (m *BoostService) ServerParser(ctx context.Context, networkId uint32, chainId ids.ID) chain.Parser {
+	//g := j.c.Genesis()
+
+	// The only thing this is using is the ActionRegistry and AuthRegistry so this should be fine
+	return &Parser{networkId, chainId, nil}
+}
+
+var _ chain.Parser = (*Parser)(nil)
+
+type Parser struct {
+	networkID uint32
+	chainID   ids.ID
+	genesis   *genesis.Genesis
+}
+
+func (p *Parser) ChainID() ids.ID {
+	return p.chainID
+}
+
+func (p *Parser) Rules(t int64) chain.Rules {
+	return p.genesis.Rules(t, p.networkID, p.chainID)
+}
+
+func (*Parser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
+	return consts.ActionRegistry, consts.AuthRegistry
+}
+
+func (m *BoostService) Parser(ctx context.Context, networkID uint32, chainId ids.ID) (chain.Parser, error) {
+
+	return &Parser{networkID, chainId, nil}, nil
 }
