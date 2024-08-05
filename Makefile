@@ -1,5 +1,5 @@
 VERSION ?= $(shell git describe --tags --always --dirty="-dev")
-DOCKER_REPO := flashbots/mev-boost
+DOCKER_REPO := AnomalyFi/anchor
 
 # Set linker flags to:
 #   -w: disables DWARF debugging information.
@@ -7,7 +7,7 @@ GO_BUILD_LDFLAGS += -w
 #   -s: disables symbol table information.
 GO_BUILD_LDFLAGS += -s
 #   -X: sets the value of the symbol.
-GO_BUILD_LDFLAGS += -X 'github.com/flashbots/mev-boost/config.Version=$(VERSION)'
+GO_BUILD_LDFLAGS += -X 'github.com/AnomalyFi/anchor/config.Version=$(VERSION)'
 
 # Remove all file system paths from the executable.
 GO_BUILD_FLAGS += -trimpath

@@ -30,6 +30,7 @@ import (
 
 	boostUtils "github.com/flashbots/go-boost-utils/utils"
 
+	"github.com/AnomalyFi/anchor/config"
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
@@ -40,7 +41,6 @@ import (
 	"github.com/flashbots/go-boost-utils/ssz"
 	"github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/go-utils/httplogger"
-	"github.com/flashbots/mev-boost/config"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
@@ -1004,6 +1004,7 @@ func (m *BoostService) handleOPGetPayload(w http.ResponseWriter, req *http.Reque
 	m.bidsLock.Unlock()
 
 	//TODO fix this part
+	//TODO this needs to create a chunk
 	transactions := make([]*chain.Transaction, len(result.response.Payload.Transactions))
 
 	vm_id := uint64(1)

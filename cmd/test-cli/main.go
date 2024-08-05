@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/AnomalyFi/anchor/server"
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	eth2ApiV1Capella "github.com/attestantio/go-eth2-client/api/v1/capella"
@@ -15,7 +16,6 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/flashbots/go-boost-utils/ssz"
-	"github.com/flashbots/mev-boost/server"
 	"github.com/sirupsen/logrus"
 )
 

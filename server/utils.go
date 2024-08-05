@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AnomalyFi/anchor/config"
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	"github.com/attestantio/go-eth2-client/spec"
@@ -21,7 +22,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/ssz"
-	"github.com/flashbots/mev-boost/config"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 )

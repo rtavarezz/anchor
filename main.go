@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/flashbots/mev-boost/cli"
+	"github.com/AnomalyFi/anchor/cli"
 )
 
 func main() {

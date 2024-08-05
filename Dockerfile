@@ -12,7 +12,7 @@ ADD . .
 RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -v \
-    -ldflags "-w -s -X 'github.com/flashbots/mev-boost/config.Version=$VERSION'" \
+    -ldflags "-w -s -X 'github.com/AnomalyFi/anchor/config.Version=$VERSION'" \
     -o mev-boost .
 
 FROM alpine

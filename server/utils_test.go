@@ -10,13 +10,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/AnomalyFi/anchor/config"
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderApiDeneb "github.com/attestantio/go-builder-client/api/deneb"
 	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
-	"github.com/flashbots/mev-boost/config"
 	"github.com/stretchr/testify/require"
 )
 

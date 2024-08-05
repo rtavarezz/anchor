@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/AnomalyFi/anchor/server"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/flashbots/mev-boost/server"
 )
 
 // Beacon - beacon node interface

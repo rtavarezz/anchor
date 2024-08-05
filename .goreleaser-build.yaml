@@ -14,7 +14,7 @@ builds:
       # Disables symbol table information.
       - -s
       # Sets the value of the symbol.
-      - -X github.com/flashbots/mev-boost/config.Version={{.Version}}
+      - -X github.com/AnomalyFi/anchor/config.Version={{.Version}}
     goos:
       - linux
       - darwin

@@ -3,7 +3,7 @@ package config
 import (
 	"os"
 
-	"github.com/flashbots/mev-boost/common"
+	"github.com/AnomalyFi/anchor/common"
 )
 
 var (

@@ -5,9 +5,9 @@ effort to acknowledge your contributions.
 
 ## Supported Versions
 
-Please see [Releases](https://github.com/flashbots/mev-boost/releases).
+Please see [Releases](https://github.com/AnomalyFi/anchor/releases).
 Generally it is recommended to use
-the [latest release](https://github.com/flashbots/mev-boost/releases/latest).
+the [latest release](https://github.com/AnomalyFi/anchor/releases/latest).
 
 ## Reporting a Vulnerability
 

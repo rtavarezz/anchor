@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flashbots/mev-boost/common"
-	"github.com/flashbots/mev-boost/config"
-	"github.com/flashbots/mev-boost/server"
+	"github.com/AnomalyFi/anchor/common"
+	"github.com/AnomalyFi/anchor/config"
+	"github.com/AnomalyFi/anchor/server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -49,7 +49,7 @@ var (
 	defaultUseGoerli          = os.Getenv("GOERLI") != ""
 	defaultUseHolesky         = os.Getenv("HOLESKY") != ""
 
-	// mev-boost relay request timeouts (see also https://github.com/flashbots/mev-boost/issues/287)
+	// mev-boost relay request timeouts (see also https://github.com/AnomalyFi/anchor/issues/287)
 	defaultTimeoutMsGetHeader         = common.GetEnvInt("RELAY_TIMEOUT_MS_GETHEADER", 950)   // timeout for getHeader requests
 	defaultTimeoutMsGetPayload        = common.GetEnvInt("RELAY_TIMEOUT_MS_GETPAYLOAD", 4000) // timeout for getPayload requests
 	defaultTimeoutMsRegisterValidator = common.GetEnvInt("RELAY_TIMEOUT_MS_REGVAL", 3000)     // timeout for registerValidator requests

@@ -43,7 +43,7 @@ curl localhost:18550/eth/v1/builder/status
 
 For example, creating a new release `v1.9`:
 
-1. Create a Github issue about the upcoming release ([example](https://github.com/flashbots/mev-boost/issues/524))
+1. Create a Github issue about the upcoming release ([example](https://github.com/AnomalyFi/anchor/issues/524))
 1. Create a release branch (`release/v1.9`)
 1. Create an alpha release: `v1.9-alpha1`
 1. Test in testnets, iterate as needed, create more alpha versions
@@ -58,11 +58,11 @@ vim config/vars.go
 git commit -am "v1.9-alpha1"
 git tag -s v1.9-alpha1  # without a tag, the Docker image would include the wrong version number
 
-# now push to Github (CI will build the Docker image: https://github.com/flashbots/mev-boost/actions)
+# now push to Github (CI will build the Docker image: https://github.com/AnomalyFi/anchor/actions)
 git push origin --tags
 
 # other parties can now test the release candidate from Docker like this:
-docker pull flashbots/mev-boost:v1.9a1
+docker pull AnomalyFi/anchor:v1.9a1
 ```
 
 ## Ask node operators to test this RC (on Goerli or Sepolia or Holesky)
@@ -73,7 +73,7 @@ docker pull flashbots/mev-boost:v1.9a1
 ## Collect code signoffs
 
 * Reach out to the parties that have reviewed the PRs and ask for a sign-off on the release
-* For possible reviewers, take a look at [recent contributors](https://github.com/flashbots/mev-boost/graphs/contributors)
+* For possible reviewers, take a look at [recent contributors](https://github.com/AnomalyFi/anchor/graphs/contributors)
 
 ## Release only with 4 eyes
 
@@ -95,8 +95,8 @@ To create a new version (with tag), follow all these steps! They are necessary t
 * Update `Version` in `config/vars.go` to next patch with `dev` suffix (eg. `v1.10-dev`) and commit to develop
 * Now push the `develop` and `stable` branches, as well as the tag: `git push origin develop stable --tags`
 
-Now check the Github CI actions for release activity: https://github.com/flashbots/mev-boost/actions
-* CI builds and pushes the Docker image, and prepares a new draft release in https://github.com/flashbots/mev-boost/releases
+Now check the Github CI actions for release activity: https://github.com/AnomalyFi/anchor/actions
+* CI builds and pushes the Docker image, and prepares a new draft release in https://github.com/AnomalyFi/anchor/releases
 * Open it and prepare the release:
   * generate the description
   * review
