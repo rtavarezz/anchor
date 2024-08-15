@@ -2,6 +2,10 @@ package server
 
 import (
 	"fmt"
+	"github.com/AnomalyFi/hypersdk/codec"
+	"github.com/attestantio/go-eth2-client/spec/bellatrix"
+	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/ava-labs/avalanchego/ids"
 	"reflect"
 
 	"github.com/holiman/uint256"
@@ -138,10 +142,84 @@ type ExecutionPayload struct {
 }
 
 type OPBid struct {
-    Value *uint256.Int `json:"value"`
-    Payload *ExecutionPayload `json:"payload"`
+	Value   *uint256.Int      `json:"value"`
+	Payload *ExecutionPayload `json:"payload"`
 }
 
 func (bid *OPBid) IsEmpty() bool {
-    return bid.Value == nil || bid.Payload == nil
+	return bid.Value == nil || bid.Payload == nil
+}
+
+type ExecutionPayload2 struct {
+	Slot      int64       `json:"slot"`
+	BlockHash common.Hash `json:"blockHash"`
+	// Array of transaction objects, each object is a byte list (DATA) representing
+	// TransactionType || TransactionPayload or LegacyTransaction as defined in EIP-2718
+	Transactions []Data `json:"transactions"`
+}
+
+// e.g seq sends request to Anchor
+type SEQHeaderRequest struct {
+	Slot           int64 `json:"slot"`
+	NumToBTxs      int   `json:"numtobtxs,omitempty"`
+	NumRoBChains   int   `json:"numrobchains,omitempty"`
+	NumRoBChunkTxs int   `json:"numrobchunktxs,omitempty"`
+}
+
+type SEQHeaderResponse struct {
+	// nodeID of chunk producing validator.
+	Producer ids.NodeID `json:"producer"`
+	// block builder address
+	PriorityFeeReceiverAddr codec.Address `json:"priorityfeereceiveraddr"`
+	// hash of the chunk
+	ChunkHash phase0.Hash32 `json:"chunkhash"`
+
+	ToBHash phase0.Hash32 `json:"tobhash"`
+
+	RoBHashes map[string]phase0.Hash32 `json:"robhashes"`
+}
+
+// Request from SEQ for the payload
+type SEQPayloadRequest struct {
+	Slot                   int64                                     `json:"slot"`
+	ToBBlindedBeaconBlock  AnchorSignedBlindedBeaconBlock            `json:"tobblindedbeaconblock"`
+	RoBBlindedBeaconBlocks map[string]AnchorSignedBlindedBeaconBlock `json:"robblindedbeaconblocks"`
+}
+
+type SEQPayloadResponse struct {
+	Slot        int64                        `json:"slot"`
+	ToBPayload  ExecutionPayload2            `json:"tobpayload"`
+	RoBPayloads map[string]ExecutionPayload2 `json:"robpayloads"`
+}
+
+type AnchorSignedBlindedBeaconBlock struct {
+	Message   *AnchorBlindedBeaconBlock
+	Signature phase0.BLSSignature `ssz-size:"96"`
+}
+
+type AnchorBlindedBeaconBlock struct {
+	Slot          phase0.Slot
+	ProposerIndex phase0.ValidatorIndex
+	ParentRoot    phase0.Root `ssz-size:"32"`
+	StateRoot     phase0.Root `ssz-size:"32"`
+	Body          *AnchorBlindedBeaconBlockBody
+}
+
+type AnchorBlindedBeaconBlockBody struct {
+	ExecutionPayloadHeader *AnchorExecutionPayloadHeader
+}
+
+type AnchorExecutionPayloadHeader struct {
+	ParentHash       phase0.Hash32              `ssz-size:"32"`
+	FeeRecipient     bellatrix.ExecutionAddress `ssz-size:"20"`
+	StateRoot        [32]byte                   `ssz-size:"32"`
+	ReceiptsRoot     [32]byte                   `ssz-size:"32"`
+	LogsBloom        [256]byte                  `ssz-size:"256"`
+	BlockNumber      uint64
+	GasLimit         uint64
+	GasUsed          uint64
+	Timestamp        uint64
+	BaseFeePerGas    [32]byte      `ssz-size:"32"`
+	BlockHash        phase0.Hash32 `ssz-size:"32"`
+	TransactionsRoot phase0.Root   `ssz-size:"32"`
 }

@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/AnomalyFi/hypersdk/codec"
 	"io"
 	"net/http"
 	"net/url"
@@ -22,11 +20,6 @@ import (
 	"github.com/ava-labs/avalanchego/ids"
 
 	"github.com/AnomalyFi/hypersdk/chain"
-	"github.com/AnomalyFi/hypersdk/crypto/ed25519"
-	"github.com/AnomalyFi/hypersdk/rpc"
-	"github.com/AnomalyFi/hypersdk/utils"
-	"github.com/AnomalyFi/nodekit-seq/actions"
-	"github.com/AnomalyFi/nodekit-seq/auth"
 	"github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
@@ -1497,39 +1490,8 @@ type SEQResponse struct {
 	Txs []*chain.Transaction `json:"txs"`
 }
 
-// e.g seq sends request to Anchor
-type SEQHeaderRequest struct {
-	NumToBTxs int
-	NumRoBChains int
-	NumRoBChunkTxs int 
-	Slots int64
-}
-
-type SEQHeaderResponse struct {
-	// nodeID of chunk producing validator.
-	Producer ids.NodeID 
-	// block builder address
-	PriorityFeeReceiverAddr codec.Address 
-	// hash of the chunk
-	Hash phase0.Hash32
-
-	ToBHash phase0.Hash32
-
-	RoBHash map[string]phase0.Hash32
-}
-
-
-type SEQPayloadRequest struct {
-	
-}
-
-type SEQPayloadResponse struct {
-
-}
-
-// TODO: 
+// TODO:
 func (m *BoostService) GetSEQTransaction(args SubmitMsgTxArgs) ([]*chain.Transaction, error) {
-
 
 	// ctx := context.Background()
 
