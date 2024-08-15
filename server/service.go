@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/AnomalyFi/hypersdk/codec"
@@ -1496,35 +1497,67 @@ type SEQResponse struct {
 	Txs []*chain.Transaction `json:"txs"`
 }
 
+// e.g seq sends request to Anchor
+type SEQHeaderRequest struct {
+	NumToBTxs int
+	NumRoBChains int
+	NumRoBChunkTxs int 
+	Slots int64
+}
+
+type SEQHeaderResponse struct {
+	// nodeID of chunk producing validator.
+	Producer ids.NodeID 
+	// block builder address
+	PriorityFeeReceiverAddr codec.Address 
+	// hash of the chunk
+	Hash phase0.Hash32
+
+	ToBHash phase0.Hash32
+
+	RoBHash map[string]phase0.Hash32
+}
+
+
+type SEQPayloadRequest struct {
+	
+}
+
+type SEQPayloadResponse struct {
+
+}
+
+// TODO: 
 func (m *BoostService) GetSEQTransaction(args SubmitMsgTxArgs) ([]*chain.Transaction, error) {
 
-	ctx := context.Background()
 
-	chainId, err := ids.FromString(args.ChainId)
-	if err != nil {
-		return nil, err
-	}
+	// ctx := context.Background()
 
-	endpoint := "fun"
+	// chainId, err := ids.FromString(args.ChainId)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	if err != nil {
-		fmt.Errorf("error with id from string", "err", err)
-	}
+	// endpoint := "fun"
+
+	// if err != nil {
+	// 	fmt.Errorf("error with id from string", "err", err)
+	// }
 
 	//tcli := trpc.NewJSONRPCClient(endpoint, 1337, chainId)
 
-	cli := rpc.NewJSONRPCClient(endpoint)
+	// cli := rpc.NewJSONRPCClient(endpoint)
 
-	unitPrices, err := cli.UnitPrices(ctx, true)
+	// unitPrices, err := cli.UnitPrices(ctx, true)
 
-	if err != nil {
-		return nil, err
-	}
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	parser := m.ServerParser(ctx, args.NetworkID, chainId)
+	// parser := m.ServerParser(ctx, args.NetworkID, chainId)
 
 	// TODO: We omitted the previous key value. Is it needed?
-	priv, err := ed25519.GeneratePrivateKey()
+	// priv, err := ed25519.GeneratePrivateKey()
 
 	// OLD Code
 	/*
@@ -1534,59 +1567,60 @@ func (m *BoostService) GetSEQTransaction(args SubmitMsgTxArgs) ([]*chain.Transac
 	       factory := auth.NewED25519Factory(priv)
 	*/
 
-	factory := auth.NewED25519Factory(priv)
-	tpriv, err := ed25519.GeneratePrivateKey()
+	// factory := auth.NewED25519Factory(priv)
+	// tpriv, err := ed25519.GeneratePrivateKey()
 
-	if err != nil {
-		return nil, err
-	}
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	// TODO: The below is a hack to get compilation working.
-	trsender := tpriv.PublicKey()
-	addr := codec.Address{}
-	copy(addr[0:32], trsender[0:32])
+	// trsender := tpriv.PublicKey()
+	// addr := codec.Address{}
+	// copy(addr[0:32], trsender[0:32])
 
-	action := &actions.SequencerMsg{
-		FromAddress: addr,
-		Data:        args.Data,
-		ChainId:     args.SecondaryChainId,
-	}
+	// action := &actions.SequencerMsg{
+	// 	FromAddress: addr,
+	// 	Data:        args.Data,
+	// 	ChainId:     args.SecondaryChainId,
+	// }
 
-	maxUnits, err := chain.EstimateMaxUnits(parser.Rules(time.Now().UnixMilli()), action, factory, nil)
-	if err != nil {
-		return nil, err
-	}
-	maxFee, err := chain.MulSum(unitPrices, maxUnits)
-	if err != nil {
-		return nil, err
-	}
+	// maxUnits, err := chain.EstimateMaxUnits(parser.Rules(time.Now().UnixMilli()), action, factory, nil)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// maxFee, err := chain.MulSum(unitPrices, maxUnits)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	now := time.Now().UnixMilli()
-	rules := parser.Rules(now)
+	// now := time.Now().UnixMilli()
+	// rules := parser.Rules(now)
 
-	base := &chain.Base{
-		Timestamp: utils.UnixRMilli(now, rules.GetValidityWindow()),
-		ChainID:   chainId,
-		MaxFee:    maxFee,
-	}
+	// base := &chain.Base{
+	// 	Timestamp: utils.UnixRMilli(now, rules.GetValidityWindow()),
+	// 	ChainID:   chainId,
+	// 	MaxFee:    maxFee,
+	// }
 
 	// Build transaction
-	actionRegistry, authRegistry := parser.Registry()
-	tx := chain.NewTx(base, nil, action, false)
-	tx, err = tx.Sign(factory, actionRegistry, authRegistry)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to sign transaction", err)
-	}
+	// actionRegistry, authRegistry := parser.Registry()
+	// tx := chain.NewTx(base, nil, action, false)
+	// tx, err = tx.Sign(factory, actionRegistry, authRegistry)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("%w: failed to sign transaction", err)
+	// }
 
 	// TODO above is new!
 
-	if err := tx.AuthAsyncVerify()(); err != nil {
-		return nil, err
-	}
+	// if err := tx.AuthAsyncVerify()(); err != nil {
+	// 	return nil, err
+	// }
 
-	ret := []*chain.Transaction{tx}
+	// ret := []*chain.Transaction{tx}
 
-	return ret, nil
+	// return ret, nil
+	return nil, nil
 
 }
 
