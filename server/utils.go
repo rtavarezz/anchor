@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	core "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"golang.org/x/exp/rand"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -277,4 +281,72 @@ func getPayloadResponseIsEmpty(payload *builderApi.VersionedSubmitBlindedBlockRe
 		return true
 	}
 	return false
+}
+
+func CreateTransaction(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) *core.Transaction {
+	toAddress := common.HexToAddress(TestAddressValue)
+	_, err := crypto.HexToECDSA(TestPrivateKeyValue)
+	if err != nil {
+		log.Fatalf("Failed to load private key: %v", err)
+	}
+
+	tx := core.NewTx(&core.LegacyTx{
+		Nonce:    nonce,
+		To:       &toAddress,
+		Value:    &value,
+		Gas:      gasLimit,
+		GasPrice: &gasPrice,
+		Data:     []byte(data),
+	})
+
+	return tx
+}
+
+// makes txs into byte form and signs txs
+func CreateTransactionAsTxBytes(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) hexutil.Bytes {
+	privateKey, err := crypto.HexToECDSA(TestPrivateKeyValue)
+	if err != nil {
+		log.Fatalf("Failed to load private key: %v", err)
+	}
+
+	tx := CreateTransaction(nonce, value, gasLimit, gasPrice, data)
+
+	chainID := big.NewInt(3) // Ropsten
+	signedTx, err := core.SignTx(tx, core.NewEIP155Signer(chainID), privateKey)
+	if err != nil {
+		log.Fatalf("Failed to sign transaction: %v", err)
+	}
+
+	rawTxBytes, err := signedTx.MarshalBinary()
+	if err != nil {
+		log.Fatalf("Failed to serialize transaction: %v", err)
+	}
+
+	return rawTxBytes
+}
+
+func CreateRandomTransaction(nonce uint64) hexutil.Bytes {
+	value := big.NewInt(int64(rand.Intn(101)))
+	gasLimit := rand.Intn(101)
+	gasPrice := big.NewInt(int64(rand.Intn(101)))
+	call := CreateTransactionAsTxBytes(nonce, *value, uint64(gasLimit), *gasPrice, data)
+	return call
+}
+
+func CreateRandomTransactions(nonce uint64, numTxs uint64) []hexutil.Bytes {
+	var list []hexutil.Bytes
+	for i := 0; i < int(numTxs); i = i + 1 {
+		tx := CreateRandomTransaction(nonce + uint64(i))
+		list = append(list, tx)
+	}
+	return list
+}
+
+func PopulateRandomHash32() phase0.Hash32 {
+	var data [32]byte
+	_, err := rand.Read(data[:])
+	if err != nil {
+		log.Fatalf("Failed to generate random data: %v", err)
+	}
+	return data
 }

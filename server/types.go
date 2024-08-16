@@ -24,6 +24,11 @@ const (
 	InvalidPayloadAttributes ErrorCode = -38003 // Payload attributes are invalid / inconsistent.
 )
 
+const (
+	TestPrivateKeyValue = "77619a19a837f894fa5c90e58ee3e3d69e382936d323d987bbde923da92a5ac5"
+	TestAddressValue    = "0x59131f2c045f70Be0dDA50D86b6ED2b18C5012cf"
+)
+
 // InputError distinguishes an user-input error from regular rpc errors,
 // to help the (Engine) API user divert from accidental input mistakes.
 type InputError struct {
@@ -154,7 +159,7 @@ func (bid *OPBid) IsEmpty() bool {
 
 // What we send to response
 type ExecutionPayload2 struct {
-	Slot      uint64       `json:"slot"`
+	Slot      uint64      `json:"slot"`
 	BlockHash common.Hash `json:"blockHash"`
 	// Array of transaction objects, each object is a byte list (DATA) representing
 	// TransactionType || TransactionPayload or LegacyTransaction as defined in EIP-2718
@@ -164,33 +169,33 @@ type ExecutionPayload2 struct {
 // e.g seq sends request to Anchor
 type SEQHeaderRequest struct {
 	Slot           uint64 `json:"slot"`
-	NumToBTxs      int   `json:"numtobtxs,omitempty"`
-	NumRoBChains   int   `json:"numrobchains,omitempty"`
-	NumRoBChunkTxs int   `json:"numrobchunktxs,omitempty"`
+	NumToBTxs      int    `json:"numtobtxs,omitempty"`
+	NumRoBChains   int    `json:"numrobchains,omitempty"`
+	NumRoBChunkTxs int    `json:"numrobchunktxs,omitempty"`
 }
 
 type SEQHeaderResponse struct {
+	Slot uint64 `json:"slot"`
 	// nodeID of chunk producing validator.
 	Producer ids.NodeID `json:"producer"`
 	// block builder address
 	PriorityFeeReceiverAddr codec.Address `json:"priorityfeereceiveraddr"`
-	// hash of the chunk
-	ChunkHash phase0.Hash32 `json:"chunkhash"`
-
-	ToBHash phase0.Hash32 `json:"tobhash"`
-
-	RoBHashes map[string]phase0.Hash32 `json:"robhashes"`
+	// hash of the anchor chunks (tob + robs)
+	ChunkHash phase0.Hash32              `json:"chunkhash"`
+	ToBHash   phase0.Hash32              `json:"tobhash"`
+	RoBHashes map[string][]phase0.Hash32 `json:"robhashes"`
 }
 
 // Request from SEQ for the payload
 type SEQPayloadRequest struct {
-	Slot                   uint64                                     `json:"slot"`
+	Slot                   uint64                                    `json:"slot"`
 	ToBBlindedBeaconBlock  AnchorSignedBlindedBeaconBlock            `json:"tobblindedbeaconblock"`
 	RoBBlindedBeaconBlocks map[string]AnchorSignedBlindedBeaconBlock `json:"robblindedbeaconblocks"`
 }
+
 // Send this back to SEQ
 type SEQPayloadResponse struct {
-	Slot        uint64                        `json:"slot"`
+	Slot        uint64                       `json:"slot"`
 	ToBPayload  ExecutionPayload2            `json:"tobpayload"`
 	RoBPayloads map[string]ExecutionPayload2 `json:"robpayloads"`
 }
@@ -212,7 +217,7 @@ type AnchorBlindedBeaconBlockBody struct {
 	ExecutionPayloadHeader *AnchorExecutionPayloadHeader
 }
 
-// recieving payload from SEQ  
+// recieving payload from SEQ
 type AnchorExecutionPayloadHeader struct {
 	FeeRecipient     bellatrix.ExecutionAddress `ssz-size:"20"`
 	StateRoot        [32]byte                   `ssz-size:"32"`
@@ -222,25 +227,24 @@ type AnchorExecutionPayloadHeader struct {
 	Timestamp        uint64
 	BlockHash        phase0.Hash32 `ssz-size:"32"`
 	TransactionsRoot phase0.Root   `ssz-size:"32"`
-	ChunkDigest 	 phase0.Root   `ssz-size:"32"`
+	ChunkDigest      phase0.Root   `ssz-size:"32"`
 }
 
-
 func (r *SEQPayloadRequest) ToJSON() ([]byte, error) {
-    return json.Marshal(r)
+	return json.Marshal(r)
 }
 
 // SEQHeaderRequest Deserialization
 func (r *SEQPayloadRequest) FromJSON(data []byte) error {
-    return json.Unmarshal(data, r)
+	return json.Unmarshal(data, r)
 }
 
 // SEQHeaderResponse Serialization
 func (r *SEQPayloadResponse) ToJSON() ([]byte, error) {
-    return json.Marshal(r)
+	return json.Marshal(r)
 }
 
 // SEQHeaderResponse Deserialization
 func (r *SEQPayloadResponse) FromJSON(data []byte) error {
-    return json.Unmarshal(data, r)
+	return json.Unmarshal(data, r)
 }

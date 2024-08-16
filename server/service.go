@@ -20,9 +20,7 @@ import (
 
 	seqconsts "github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/crypto"
 	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/hypersdk/chain"
@@ -39,7 +37,6 @@ import (
 	eth2ApiV1Capella "github.com/attestantio/go-eth2-client/api/v1/capella"
 	eth2ApiV1Deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
-	core "github.com/ethereum/go-ethereum/core/types"
 	"github.com/flashbots/go-boost-utils/ssz"
 	flash "github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/go-utils/httplogger"
@@ -58,17 +55,12 @@ var (
 )
 
 var (
-	nonce uint64
-	value big.Int
+	nonce    uint64
+	value    big.Int
 	gasLimit uint64
 	gasPrice big.Int
-	data string
+	data     string
 )
-
-const (
-	TestPrivateKeyValue = "77619a19a837f894fa5c90e58ee3e3d69e382936d323d987bbde923da92a5ac5"
-	TestAddressValue    = "0x59131f2c045f70Be0dDA50D86b6ED2b18C5012cf"
-  )
 
 var (
 	nilHash     = phase0.Hash32{}
@@ -132,10 +124,12 @@ type BoostService struct {
 
 	slotUID     *slotUID
 	slotUIDLock sync.Mutex
-	mockChunkToB []hexutil.Bytes
-	mockChunkRoB map[string][]hexutil.Bytes
-	mockNonce 	uint64
 
+	// Below used only for testing
+	mockChunkToB     []hexutil.Bytes
+	mockChunkRoB     map[string][]hexutil.Bytes
+	mockCurrNonce    uint64
+	mockExpectedSlot uint64
 }
 
 // go program calls this on boot up automatically
@@ -359,327 +353,7 @@ func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.
 	m.respondError(w, http.StatusBadGateway, errNoSuccessfulRelayResponse.Error())
 }
 
-// handleGetHeader requests bids from the relays(Baton)
-// type SEQHeaderRequest struct {
-// 	Slot           uint64 `json:"slot"`
-// 	NumToBTxs      int   `json:"numtobtxs,omitempty"`
-// 	NumRoBChains   int   `json:"numrobchains,omitempty"`
-// 	NumRoBChunkTxs int   `json:"numrobchunktxs,omitempty"`
-// }
-
-func (m *BoostService) CreateTransaction(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) *core.Transaction {
-	toAddress := common.HexToAddress(TestAddressValue)
-	_, err := crypto.HexToECDSA(TestPrivateKeyValue)
-	if err != nil {
-	  log.Fatalf("Failed to load private key: %v", err)
-	}
-  
-	tx := core.NewTx(&core.LegacyTx{
-	  Nonce:    nonce,
-	  To:       &toAddress,
-	  Value:    &value,
-	  Gas:      gasLimit,
-	  GasPrice: &gasPrice,
-	  Data:     []byte(data),
-	})
-  
-	return tx
-}
-
-// makes txs into byte form and signs txs
-func (m *BoostService) CreateTransactionAsTxBytes(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) hexutil.Bytes {
-	privateKey, err := crypto.HexToECDSA(TestPrivateKeyValue)
-	if err != nil {
-		log.Fatalf("Failed to load private key: %v", err)
-	}
-
-	tx := m.CreateTransaction(nonce, value, gasLimit, gasPrice, data)
-
-	chainID := big.NewInt(3) // Ropsten
-	signedTx, err := core.SignTx(tx, core.NewEIP155Signer(chainID), privateKey)
-	if err != nil {
-		log.Fatalf("Failed to sign transaction: %v", err)
-	}
-
-	rawTxBytes, err := signedTx.MarshalBinary()
-	if err != nil {
-		log.Fatalf("Failed to serialize transaction: %v", err)
-	}
-
-	return rawTxBytes
-}
-
-func (m *BoostService) CreateRandomTransaction(nonce uint64) hexutil.Bytes {
-	value := big.NewInt(int64(rand.Intn(101)))
-	gasLimit := rand.Intn(101)
-	gasPrice := big.NewInt(int64(rand.Intn(101)))
-	call := m.CreateTransactionAsTxBytes(nonce, *value, uint64(gasLimit), *gasPrice, data) 
-	return call
-}
-
-func (m *BoostService) CreateRandomTransactions(nonce uint64, numTxs uint64) []hexutil.Bytes {
-	var list []hexutil.Bytes
-	for i := 0; i < int(numTxs); i = i+1 {
-		tx := m.CreateRandomTransaction(nonce + uint64(i))
-		list = append(list, tx)
-	}
-	return list
-}
-
-
-func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request) {
-	//TODO: everytime this function is called, we need mock chunks
-	// generate mock chunks' headers(Baton would generate headers for mock chunks) and return them back to seq
-
-	// parsing SEQHeaderRequest
-	vars := mux.Vars(req)
-	slot := vars["Slot"]
-	numToBTxs := vars["NumToBTxs"]
-	numRoBChains := vars["NumRoBChains"]
-	numRoBChunkTxs := vars["NumRoBChunkTxs"]
-
-	// converts slot from string to uint64
-	_slot, err := strconv.ParseUint(slot, 10, 64)
-	if err != nil {
-		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
-		return
-	}
-
-	_numToBTxs, err := strconv.ParseUint(numToBTxs, 10, 64)
-	if err != nil {
-		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
-		return
-	}
-
-	_numRoBChains, err := strconv.ParseUint(numRoBChains, 10, 64)
-	if err != nil {
-		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
-		return
-	}
-
-	_numRoBChunkTxs, err := strconv.ParseUint(numRoBChunkTxs, 10, 64)
-	if err != nil {
-		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
-		return
-	}
-	mockChunks := m.CreateRandomTransactions(nonce, _numToBTxs)
-
-	// populated ToB chunk of SEQ block with the 1 chunk made above
-	m.mockChunkToB = mockChunks
-
-	// populated RoB chunks by numRoBChains(counter for how many RoB chunks are in SEQ block)
-	// and then creates random txs for those RoB chunks
-	for i := 0; i < int(_numRoBChains); i += 1 {
-		mockRoBTxs := m.CreateRandomTransactions(nonce, _numRoBChunkTxs)
-	}
-
-	// sending the response to SEQ awaiting signature
-	var res *SEQHeaderResponse
-	m.respondOK(w, res)
-
-	// // send
-	// ua := UserAgent(req.Header.Get("User-Agent"))
-	// log := m.log.WithFields(logrus.Fields{
-	// 	"method":     "getHeader",
-	// 	"slot":       slot,
-	// 	"parentHash": parentHashHex,
-	// 	"pubkey":     pubkey,
-	// 	"ua":         ua,
-	// })
-	// log.Debug("getHeader")
-
-	// _slot, err := strconv.ParseUint(slot, 10, 64)
-	// if err != nil {
-	// 	m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
-	// 	return
-	// }
-
-	// if len(pubkey) != 98 {
-	// 	m.respondError(w, http.StatusBadRequest, errInvalidPubkey.Error())
-	// 	return
-	// }
-
-	// if len(parentHashHex) != 66 {
-	// 	m.respondError(w, http.StatusBadRequest, errInvalidHash.Error())
-	// 	return
-	// }
-
-	// // Make sure we have a uid for this slot
-	// m.slotUIDLock.Lock()
-	// if m.slotUID.slot < _slot {
-	// 	m.slotUID.slot = _slot
-	// 	m.slotUID.uid = uuid.New()
-	// }
-	// slotUID := m.slotUID.uid
-	// m.slotUIDLock.Unlock()
-	// log = log.WithField("slotUID", slotUID)
-
-	// // Log how late into the slot the request starts
-	// slotStartTimestamp := m.genesisTime + _slot*config.SlotTimeSec
-	// msIntoSlot := uint64(time.Now().UTC().UnixMilli()) - slotStartTimestamp*1000
-	// log.WithFields(logrus.Fields{
-	// 	"genesisTime": m.genesisTime,
-	// 	"slotTimeSec": config.SlotTimeSec,
-	// 	"msIntoSlot":  msIntoSlot,
-	// }).Infof("getHeader request start - %d milliseconds into slot %d", msIntoSlot, _slot)
-
-	// // Add request headers
-	// headers := map[string]string{
-	// 	HeaderKeySlotUID: slotUID.String(),
-	// }
-
-	// // Prepare relay responses
-	// result := bidResp{}                           // the final response, containing the highest bid (if any)
-	// relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
-
-	// Call the relays
-	// var mu sync.Mutex
-	// var wg sync.WaitGroup
-	// for _, relay := range m.relays {
-	// 	wg.Add(1)
-	// 	go func(relay RelayEntry) {
-	// 		defer wg.Done()
-	// 		// goal: get an execution payload header
-	// 		// 1.) this endpoint below exists in Baton but needs implementation fixes
-	// 		// 2.) pass
-	// 		path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashHex, pubkey)
-	// 		url := relay.GetURI(path)
-	// 		log := log.WithField("url", url)
-	// 		responsePayload := new(builderSpec.VersionedSignedBuilderBid)
-	// 		code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, responsePayload)
-	// 		if err != nil {
-	// 			log.WithError(err).Warn("error making request to relay")
-	// 			return
-	// 		}
-
-	// 		if code == http.StatusNoContent {
-	// 			log.Debug("no-content response")
-	// 			return
-	// 		}
-
-	// 		// Skip if payload is empty
-	// 		if responsePayload.IsEmpty() {
-	// 			return
-	// 		}
-
-	// 		// Getting the bid info will check if there are missing fields in the response
-	// 		bidInfo, err := parseBidInfo(responsePayload)
-	// 		if err != nil {
-	// 			log.WithError(err).Warn("error parsing bid info")
-	// 			return
-	// 		}
-
-	// 		if bidInfo.blockHash == nilHash {
-	// 			log.Warn("relay responded with empty block hash")
-	// 			return
-	// 		}
-
-	// 		valueEth := weiBigIntToEthBigFloat(bidInfo.value.ToBig())
-	// 		log = log.WithFields(logrus.Fields{
-	// 			"blockNumber": bidInfo.blockNumber,
-	// 			"blockHash":   bidInfo.blockHash.String(),
-	// 			"txRoot":      bidInfo.txRoot.String(),
-	// 			"value":       valueEth.Text('f', 18),
-	// 		})
-
-	// 		if relay.PublicKey.String() != bidInfo.pubkey.String() {
-	// 			log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), bidInfo.pubkey.String())
-	// 			return
-	// 		}
-
-	// 		// Verify the relay signature in the relay response
-	// 		if !config.SkipRelaySignatureCheck {
-	// 			ok, err := checkRelaySignature(responsePayload, m.builderSigningDomain, relay.PublicKey)
-	// 			if err != nil {
-	// 				log.WithError(err).Error("error verifying relay signature")
-	// 				return
-	// 			}
-	// 			if !ok {
-	// 				log.Error("failed to verify relay signature")
-	// 				return
-	// 			}
-	// 		}
-
-	// 		// Verify response coherence with proposer's input data
-	// 		if bidInfo.parentHash.String() != parentHashHex {
-	// 			log.WithFields(logrus.Fields{
-	// 				"originalParentHash": parentHashHex,
-	// 				"responseParentHash": bidInfo.parentHash.String(),
-	// 			}).Error("proposer and relay parent hashes are not the same")
-	// 			return
-	// 		}
-
-	// 		isZeroValue := bidInfo.value.IsZero()
-	// 		isEmptyListTxRoot := bidInfo.txRoot.String() == "0x7ffe241ea60187fdb0187bfa22de35d1f9bed7ab061d9401fd47e34a54fbede1"
-	// 		if isZeroValue || isEmptyListTxRoot {
-	// 			log.Warn("ignoring bid with 0 value")
-	// 			return
-	// 		}
-	// 		log.Debug("bid received")
-
-	// 		// Skip if value (fee) is lower than the minimum bid
-	// 		if bidInfo.value.CmpBig(m.relayMinBid.BigInt()) == -1 {
-	// 			log.Debug("ignoring bid below min-bid value")
-	// 			return
-	// 		}
-
-	// 		mu.Lock()
-	// 		defer mu.Unlock()
-
-	// 		// Remember which relays delivered which bids (multiple relays might deliver the top bid)
-	// 		relays[BlockHashHex(bidInfo.blockHash.String())] = append(relays[BlockHashHex(bidInfo.blockHash.String())], relay)
-
-	// 		// Compare the bid with already known top bid (if any)
-	// 		if !result.response.IsEmpty() {
-	// 			valueDiff := bidInfo.value.Cmp(result.bidInfo.value)
-	// 			if valueDiff == -1 { // current bid is less profitable than already known one
-	// 				return
-	// 			} else if valueDiff == 0 { // current bid is equally profitable as already known one. Use hash as tiebreaker
-	// 				previousBidBlockHash := result.bidInfo.blockHash
-	// 				if bidInfo.blockHash.String() >= previousBidBlockHash.String() {
-	// 					return
-	// 				}
-	// 			}
-	// 		}
-
-	// 		// Use this relay's response as mev-boost response because it's most profitable
-	// 		log.Debug("new best bid")
-	// 		result.response = *responsePayload
-	// 		result.bidInfo = bidInfo
-	// 		result.t = time.Now()
-	// 	}(relay)
-	// }
-
-	// // Wait for all requests to complete...
-	// wg.Wait()
-
-	// if result.response.IsEmpty() {
-	// 	log.Info("no bid received")
-	// 	w.WriteHeader(http.StatusNoContent)
-	// 	return
-	// }
-
-	// // Log result
-	// valueEth := weiBigIntToEthBigFloat(result.bidInfo.value.ToBig())
-	// result.relays = relays[BlockHashHex(result.bidInfo.blockHash.String())]
-	// log.WithFields(logrus.Fields{
-	// 	"blockHash":   result.bidInfo.blockHash.String(),
-	// 	"blockNumber": result.bidInfo.blockNumber,
-	// 	"txRoot":      result.bidInfo.txRoot.String(),
-	// 	"value":       valueEth.Text('f', 18),
-	// 	"relays":      strings.Join(RelayEntriesToStrings(result.relays), ", "),
-	// }).Info("best bid")
-
-	// // Remember the bid, for future logging in case of withholding
-	// bidKey := bidRespKey{slot: _slot, blockHash: result.bidInfo.blockHash.String()}
-	// m.bidsLock.Lock()
-	// m.bids[bidKey] = result
-	// m.bidsLock.Unlock()
-
-	// // Return the bid
-	// m.respondOK(w, &result.response)
-}
-
+// Original
 func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	slot := vars["slot"]
@@ -885,7 +559,91 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 	m.respondOK(w, &result.response)
 }
 
-// note: recieve payload from Baton first, then we verify the payload and send to SEQ
+// Mock implementation
+func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request) {
+	//TODO: everytime this function is called, we need mock chunks
+	// generate mock chunks' headers(Baton would generate headers for mock chunks) and return them back to seq
+
+	// parsing SEQHeaderRequest
+	vars := mux.Vars(req)
+
+	slot := vars["Slot"]
+	_slot, err := strconv.ParseUint(slot, 10, 64)
+	if err != nil {
+		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+		return
+	}
+
+	// Optional param, numToBTxs indicates the number of txs in the ToB chunk
+	numToBTxsToken, ok := vars["NumToBTxs"]
+	numToBTxs := uint64(1)
+	if ok {
+		_numToBTxs, err := strconv.ParseUint(numToBTxsToken, 10, 32)
+		if err != nil {
+			m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+			return
+		}
+		numToBTxs = _numToBTxs
+	}
+
+	// Optional param, NumRoBChains indicates the number of chunks in the RoB
+	numRoBChainsToken, ok := vars["NumRoBChains"]
+	numRoBChains := uint64(1)
+	if ok {
+		_numRoBChains, err := strconv.ParseUint(numRoBChainsToken, 10, 32)
+		if err != nil {
+			m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+			return
+		}
+		numRoBChains = _numRoBChains
+	}
+
+	// Optional param, NumRoBChunkTxs indicates the number of chunk
+	numRoBChunkTxsToken, ok := vars["NumRoBChunkTxs"]
+	numRoBChunkTxs := uint64(1)
+	if ok {
+		_numRoBChunkTxs, err := strconv.ParseUint(numRoBChunkTxsToken, 10, 32)
+		if err != nil {
+			m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+			return
+		}
+		numRoBChunkTxs = _numRoBChunkTxs
+	}
+
+	m.mockExpectedSlot = _slot
+	// populated ToB chunk of SEQ block with the 1 chunk made above
+	m.mockChunkToB = CreateRandomTransactions(nonce, numToBTxs)
+
+	// populated RoB chunks by numRoBChains(counter for how many RoB chunks are in SEQ block)
+	// and then creates random txs for those RoB chunks
+	m.mockChunkRoB = make(map[string][]hexutil.Bytes)
+	for i := 0; i < int(numRoBChains); i++ {
+		mockRoBTxs := CreateRandomTransactions(nonce, numRoBChunkTxs)
+		chainID := "chain_" + strconv.Itoa(i)
+		m.mockChunkRoB[chainID] = mockRoBTxs
+	}
+
+	// sending the response to SEQ awaiting signature
+	var res SEQHeaderResponse
+	res.Slot = _slot
+	res.ToBHash = PopulateRandomHash32()
+
+	// generate a random header hash  per RoB chunk
+	for k, v := range m.mockChunkRoB {
+		if len(v) == 0 {
+			log.Fatal("Zero-sized chunk ended up in RoB with key: " + k)
+		}
+
+		for _ = range v {
+			headerHash := PopulateRandomHash32()
+			res.RoBHashes[k] = append(res.RoBHashes[k], headerHash)
+		}
+	}
+
+	m.respondOK(w, res)
+}
+
+// note: receive payload from Baton first, then we verify the payload and send to SEQ
 func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, payload *eth2ApiV1Capella.SignedBlindedBeaconBlock, body []byte) {
 	if payload.Message == nil || payload.Message.Body == nil || payload.Message.Body.ExecutionPayloadHeader == nil {
 		log.WithField("body", string(body)).Error("missing parts of the request payload from the beacon-node")
@@ -1164,6 +922,7 @@ func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Requ
 	m.respondOK(w, result)
 }
 
+// original implementation
 func (m *BoostService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
 	log.Debug("getPayload request starts")
@@ -1192,7 +951,8 @@ func (m *BoostService) handleGetPayload(w http.ResponseWriter, req *http.Request
 	m.processDenebPayload(w, req, log, payload)
 }
 
-// note function for integration
+// Mock custom handler. Note this is a true mock. It does no checking of the info
+// received from SEQ and just sends the payload back.
 func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
 	log.Debug("getPayload request starts")
@@ -1205,6 +965,20 @@ func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
+	var payloadReq SEQPayloadRequest
+	err = payloadReq.FromJSON(body)
+	if err != nil {
+		log.WithError(err).Error("could not deserialize body from res request")
+		m.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if payloadReq.Slot != m.mockExpectedSlot {
+		errorMsg := "received unexpected slot in GetPayload request"
+		log.WithError(err).Error(errorMsg)
+		m.respondError(w, http.StatusBadRequest, errorMsg)
+	}
+
 	// type SEQPayloadResponse struct {
 	// 	Slot        uint64                        `json:"slot"`
 	// 	ToBPayload  ExecutionPayload2            `json:"tobpayload"`
@@ -1215,40 +989,28 @@ func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Reques
 	// 	ToBBlindedBeaconBlock  AnchorSignedBlindedBeaconBlock            `json:"tobblindedbeaconblock"`
 	// 	RoBBlindedBeaconBlocks map[string]AnchorSignedBlindedBeaconBlock `json:"robblindedbeaconblocks"`
 	// }
-	// need the new function
-	var payload SEQPayloadResponse
-	var payloadReq SEQPayloadRequest
 
-	err = payloadReq.FromJSON(body)
-	if err != nil {
-		log.WithError(err).Error("could not deserialize body from payload request")
-		m.respondError(w, http.StatusBadRequest, err.Error())
-		return
+	// TODO: Populate blockhash if needed later
+	// TODO: Add new function for SEQPayloadResponse
+	var res SEQPayloadResponse
+	res.Slot = payloadReq.Slot
+	res.ToBPayload.Transactions = m.mockChunkToB
+
+	for k, v := range m.mockChunkRoB {
+		res.RoBPayloads[k] = ExecutionPayload2{
+			Slot:         m.mockExpectedSlot,
+			Transactions: v,
+		}
 	}
 
-	resBody, err2 := payload.ToJSON()
+	resBody, err2 := res.ToJSON()
 	if err2 != nil {
-		log.WithError(err).Error("could not serialize payload response")
+		log.WithError(err).Error("could not serialize res response")
 		m.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	m.respondOK(w, resBody)
-
-	// Decode the body now
-	// payload := new(eth2ApiV1Deneb.SignedBlindedBeaconBlock)
-	// if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-	// 	log.Debug("could not decode Deneb request payload, attempting to decode body into Capella payload")
-	// 	payload := new(eth2ApiV1Capella.SignedBlindedBeaconBlock)
-	// 	if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-	// 		log.WithError(err).WithField("body", string(body)).Error("could not decode request payload from the beacon-node (signed blinded beacon block)")
-	// 		m.respondError(w, http.StatusBadRequest, err.Error())
-	// 		return
-	// 	}
-	// 	m.processCapellaPayload(w, req, log, payload, body)
-	// 	return
-	// }
-	// m.processDenebPayload(w, req, log, payload)
 }
 
 func (m *BoostService) handleOPGetPayload2(w http.ResponseWriter, req *http.Request) {
