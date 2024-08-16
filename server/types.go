@@ -150,8 +150,9 @@ func (bid *OPBid) IsEmpty() bool {
 	return bid.Value == nil || bid.Payload == nil
 }
 
+// What we send to response
 type ExecutionPayload2 struct {
-	Slot      int64       `json:"slot"`
+	Slot      uint64       `json:"slot"`
 	BlockHash common.Hash `json:"blockHash"`
 	// Array of transaction objects, each object is a byte list (DATA) representing
 	// TransactionType || TransactionPayload or LegacyTransaction as defined in EIP-2718
@@ -160,7 +161,7 @@ type ExecutionPayload2 struct {
 
 // e.g seq sends request to Anchor
 type SEQHeaderRequest struct {
-	Slot           int64 `json:"slot"`
+	Slot           uint64 `json:"slot"`
 	NumToBTxs      int   `json:"numtobtxs,omitempty"`
 	NumRoBChains   int   `json:"numrobchains,omitempty"`
 	NumRoBChunkTxs int   `json:"numrobchunktxs,omitempty"`
@@ -181,13 +182,13 @@ type SEQHeaderResponse struct {
 
 // Request from SEQ for the payload
 type SEQPayloadRequest struct {
-	Slot                   int64                                     `json:"slot"`
+	Slot                   uint64                                     `json:"slot"`
 	ToBBlindedBeaconBlock  AnchorSignedBlindedBeaconBlock            `json:"tobblindedbeaconblock"`
 	RoBBlindedBeaconBlocks map[string]AnchorSignedBlindedBeaconBlock `json:"robblindedbeaconblocks"`
 }
-
+// Send this back to SEQ
 type SEQPayloadResponse struct {
-	Slot        int64                        `json:"slot"`
+	Slot        uint64                        `json:"slot"`
 	ToBPayload  ExecutionPayload2            `json:"tobpayload"`
 	RoBPayloads map[string]ExecutionPayload2 `json:"robpayloads"`
 }
@@ -209,17 +210,15 @@ type AnchorBlindedBeaconBlockBody struct {
 	ExecutionPayloadHeader *AnchorExecutionPayloadHeader
 }
 
+// recieving payload from SEQ  
 type AnchorExecutionPayloadHeader struct {
-	ParentHash       phase0.Hash32              `ssz-size:"32"`
 	FeeRecipient     bellatrix.ExecutionAddress `ssz-size:"20"`
 	StateRoot        [32]byte                   `ssz-size:"32"`
 	ReceiptsRoot     [32]byte                   `ssz-size:"32"`
 	LogsBloom        [256]byte                  `ssz-size:"256"`
 	BlockNumber      uint64
-	GasLimit         uint64
-	GasUsed          uint64
 	Timestamp        uint64
-	BaseFeePerGas    [32]byte      `ssz-size:"32"`
 	BlockHash        phase0.Hash32 `ssz-size:"32"`
 	TransactionsRoot phase0.Root   `ssz-size:"32"`
+	ChunkDigest 	 phase0.Root   `ssz-size:"32"`
 }
