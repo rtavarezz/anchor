@@ -1,12 +1,14 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/AnomalyFi/hypersdk/codec"
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ava-labs/avalanchego/ids"
-	"reflect"
 
 	"github.com/holiman/uint256"
 
@@ -221,4 +223,24 @@ type AnchorExecutionPayloadHeader struct {
 	BlockHash        phase0.Hash32 `ssz-size:"32"`
 	TransactionsRoot phase0.Root   `ssz-size:"32"`
 	ChunkDigest 	 phase0.Root   `ssz-size:"32"`
+}
+
+
+func (r *SEQPayloadRequest) ToJSON() ([]byte, error) {
+    return json.Marshal(r)
+}
+
+// SEQHeaderRequest Deserialization
+func (r *SEQPayloadRequest) FromJSON(data []byte) error {
+    return json.Unmarshal(data, r)
+}
+
+// SEQHeaderResponse Serialization
+func (r *SEQPayloadResponse) ToJSON() ([]byte, error) {
+    return json.Marshal(r)
+}
+
+// SEQHeaderResponse Deserialization
+func (r *SEQPayloadResponse) FromJSON(data []byte) error {
+    return json.Unmarshal(data, r)
 }

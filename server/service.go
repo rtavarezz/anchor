@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +20,10 @@ import (
 
 	seqconsts "github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/ava-labs/avalanchego/ids"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
+	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/hypersdk/chain"
 	"github.com/AnomalyFi/nodekit-seq/consts"
@@ -33,8 +39,9 @@ import (
 	eth2ApiV1Capella "github.com/attestantio/go-eth2-client/api/v1/capella"
 	eth2ApiV1Deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	core "github.com/ethereum/go-ethereum/core/types"
 	"github.com/flashbots/go-boost-utils/ssz"
-	"github.com/flashbots/go-boost-utils/types"
+	flash "github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/go-utils/httplogger"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -49,6 +56,19 @@ var (
 	errNoSuccessfulRelayResponse = errors.New("no successful relay response")
 	errServerAlreadyRunning      = errors.New("server already running")
 )
+
+var (
+	nonce uint64
+	value big.Int
+	gasLimit uint64
+	gasPrice big.Int
+	data string
+)
+
+const (
+	TestPrivateKeyValue = "77619a19a837f894fa5c90e58ee3e3d69e382936d323d987bbde923da92a5ac5"
+	TestAddressValue    = "0x59131f2c045f70Be0dDA50D86b6ED2b18C5012cf"
+  )
 
 var (
 	nilHash     = phase0.Hash32{}
@@ -80,7 +100,7 @@ type BoostServiceOpts struct {
 	GenesisForkVersionHex string
 	GenesisTime           uint64
 	RelayCheck            bool
-	RelayMinBid           types.U256Str
+	RelayMinBid           flash.U256Str
 
 	RequestTimeoutGetHeader  time.Duration
 	RequestTimeoutGetPayload time.Duration
@@ -96,7 +116,7 @@ type BoostService struct {
 	log           *logrus.Entry
 	srv           *http.Server
 	relayCheck    bool
-	relayMinBid   types.U256Str
+	relayMinBid   flash.U256Str
 	genesisTime   uint64
 
 	builderSigningDomain   phase0.Domain
@@ -112,6 +132,15 @@ type BoostService struct {
 
 	slotUID     *slotUID
 	slotUIDLock sync.Mutex
+	mockChunkToB []hexutil.Bytes
+	mockChunkRoB map[string][]hexutil.Bytes
+	mockNonce 	uint64
+
+}
+
+// go program calls this on boot up automatically
+func init() {
+	rand.Seed(uint64(time.Now().UnixNano()))
 }
 
 // NewBoostService created a new BoostService
@@ -337,7 +366,70 @@ func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.
 // 	NumRoBChains   int   `json:"numrobchains,omitempty"`
 // 	NumRoBChunkTxs int   `json:"numrobchunktxs,omitempty"`
 // }
+
+func (m *BoostService) CreateTransaction(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) *core.Transaction {
+	toAddress := common.HexToAddress(TestAddressValue)
+	_, err := crypto.HexToECDSA(TestPrivateKeyValue)
+	if err != nil {
+	  log.Fatalf("Failed to load private key: %v", err)
+	}
+  
+	tx := core.NewTx(&core.LegacyTx{
+	  Nonce:    nonce,
+	  To:       &toAddress,
+	  Value:    &value,
+	  Gas:      gasLimit,
+	  GasPrice: &gasPrice,
+	  Data:     []byte(data),
+	})
+  
+	return tx
+}
+
+// makes txs into byte form and signs txs
+func (m *BoostService) CreateTransactionAsTxBytes(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) hexutil.Bytes {
+	privateKey, err := crypto.HexToECDSA(TestPrivateKeyValue)
+	if err != nil {
+		log.Fatalf("Failed to load private key: %v", err)
+	}
+
+	tx := m.CreateTransaction(nonce, value, gasLimit, gasPrice, data)
+
+	chainID := big.NewInt(3) // Ropsten
+	signedTx, err := core.SignTx(tx, core.NewEIP155Signer(chainID), privateKey)
+	if err != nil {
+		log.Fatalf("Failed to sign transaction: %v", err)
+	}
+
+	rawTxBytes, err := signedTx.MarshalBinary()
+	if err != nil {
+		log.Fatalf("Failed to serialize transaction: %v", err)
+	}
+
+	return rawTxBytes
+}
+
+func (m *BoostService) CreateRandomTransaction(nonce uint64) hexutil.Bytes {
+	value := big.NewInt(int64(rand.Intn(101)))
+	gasLimit := rand.Intn(101)
+	gasPrice := big.NewInt(int64(rand.Intn(101)))
+	call := m.CreateTransactionAsTxBytes(nonce, *value, uint64(gasLimit), *gasPrice, data) 
+	return call
+}
+
+func (m *BoostService) CreateRandomTransactions(nonce uint64, numTxs uint64) []hexutil.Bytes {
+	var list []hexutil.Bytes
+	for i := 0; i < int(numTxs); i = i+1 {
+		tx := m.CreateRandomTransaction(nonce + uint64(i))
+		list = append(list, tx)
+	}
+	return list
+}
+
+
 func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request) {
+	//TODO: everytime this function is called, we need mock chunks
+	// generate mock chunks' headers(Baton would generate headers for mock chunks) and return them back to seq
 
 	// parsing SEQHeaderRequest
 	vars := mux.Vars(req)
@@ -353,11 +445,39 @@ func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request
 		return
 	}
 
+	_numToBTxs, err := strconv.ParseUint(numToBTxs, 10, 64)
+	if err != nil {
+		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+		return
+	}
+
+	_numRoBChains, err := strconv.ParseUint(numRoBChains, 10, 64)
+	if err != nil {
+		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+		return
+	}
+
+	_numRoBChunkTxs, err := strconv.ParseUint(numRoBChunkTxs, 10, 64)
+	if err != nil {
+		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+		return
+	}
+	mockChunks := m.CreateRandomTransactions(nonce, _numToBTxs)
+
+	// populated ToB chunk of SEQ block with the 1 chunk made above
+	m.mockChunkToB = mockChunks
+
+	// populated RoB chunks by numRoBChains(counter for how many RoB chunks are in SEQ block)
+	// and then creates random txs for those RoB chunks
+	for i := 0; i < int(_numRoBChains); i += 1 {
+		mockRoBTxs := m.CreateRandomTransactions(nonce, _numRoBChunkTxs)
+	}
+
 	// sending the response to SEQ awaiting signature
 	var res *SEQHeaderResponse
 	m.respondOK(w, res)
-	
-	// // send 
+
+	// // send
 	// ua := UserAgent(req.Header.Get("User-Agent"))
 	// log := m.log.WithFields(logrus.Fields{
 	// 	"method":     "getHeader",
@@ -413,24 +533,24 @@ func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request
 	// relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
 
 	// Call the relays
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, relay := range m.relays {
-		wg.Add(1)
-		go func(relay RelayEntry) {
-			defer wg.Done()
-			// goal: get an execution payload header
-			// 1.) this endpoint below exists in Baton but needs implementation fixes
-			// 2.) pass
-			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashHex, pubkey)
-			url := relay.GetURI(path)
-			log := log.WithField("url", url)
-			responsePayload := new(builderSpec.VersionedSignedBuilderBid)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, responsePayload)
-			if err != nil {
-				log.WithError(err).Warn("error making request to relay")
-				return
-			}
+	// var mu sync.Mutex
+	// var wg sync.WaitGroup
+	// for _, relay := range m.relays {
+	// 	wg.Add(1)
+	// 	go func(relay RelayEntry) {
+	// 		defer wg.Done()
+	// 		// goal: get an execution payload header
+	// 		// 1.) this endpoint below exists in Baton but needs implementation fixes
+	// 		// 2.) pass
+	// 		path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashHex, pubkey)
+	// 		url := relay.GetURI(path)
+	// 		log := log.WithField("url", url)
+	// 		responsePayload := new(builderSpec.VersionedSignedBuilderBid)
+	// 		code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, responsePayload)
+	// 		if err != nil {
+	// 			log.WithError(err).Warn("error making request to relay")
+	// 			return
+	// 		}
 
 	// 		if code == http.StatusNoContent {
 	// 			log.Debug("no-content response")
@@ -764,6 +884,7 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 	// Return the bid
 	m.respondOK(w, &result.response)
 }
+
 // note: recieve payload from Baton first, then we verify the payload and send to SEQ
 func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, payload *eth2ApiV1Capella.SignedBlindedBeaconBlock, body []byte) {
 	if payload.Message == nil || payload.Message.Body == nil || payload.Message.Body.ExecutionPayloadHeader == nil {
@@ -1071,6 +1192,7 @@ func (m *BoostService) handleGetPayload(w http.ResponseWriter, req *http.Request
 	m.processDenebPayload(w, req, log, payload)
 }
 
+// note function for integration
 func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
 	log.Debug("getPayload request starts")
@@ -1097,7 +1219,21 @@ func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Reques
 	var payload SEQPayloadResponse
 	var payloadReq SEQPayloadRequest
 
+	err = payloadReq.FromJSON(body)
+	if err != nil {
+		log.WithError(err).Error("could not deserialize body from payload request")
+		m.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
+	resBody, err2 := payload.ToJSON()
+	if err2 != nil {
+		log.WithError(err).Error("could not serialize payload response")
+		m.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	m.respondOK(w, resBody)
 
 	// Decode the body now
 	// payload := new(eth2ApiV1Deneb.SignedBlindedBeaconBlock)
