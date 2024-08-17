@@ -191,7 +191,7 @@ func Main() {
 		log.WithError(err).Fatal("failed converting min bid")
 	}
 
-	opts := server.BoostServiceOpts{
+	opts := server.AnchorServiceOpts{
 		Log:                      log,
 		ListenAddr:               *listenAddr,
 		Relays:                   relays,
@@ -205,7 +205,7 @@ func Main() {
 		RequestTimeoutRegVal:     time.Duration(*relayTimeoutMsRegVal) * time.Millisecond,
 		RequestMaxRetries:        *relayRequestMaxRetries,
 	}
-	service, err := server.NewBoostService(opts)
+	service, err := server.NewAnchorService(opts)
 	if err != nil {
 		log.WithError(err).Fatal("failed creating the server")
 	}

@@ -55,7 +55,6 @@ var (
 )
 
 var (
-	nonce    uint64
 	value    big.Int
 	gasLimit uint64
 	gasPrice big.Int
@@ -83,8 +82,8 @@ type slotUID struct {
 	uid  uuid.UUID
 }
 
-// BoostServiceOpts provides all available options for use with NewBoostService
-type BoostServiceOpts struct {
+// AnchorServiceOpts provides all available options for use with NewAnchorService
+type AnchorServiceOpts struct {
 	Log                   *logrus.Entry
 	ListenAddr            string
 	Relays                []RelayEntry
@@ -100,8 +99,8 @@ type BoostServiceOpts struct {
 	RequestMaxRetries        int
 }
 
-// BoostService - the mev-boost service
-type BoostService struct {
+// AnchorService - the mev-boost service
+type AnchorService struct {
 	listenAddr    string
 	relays        []RelayEntry
 	relayMonitors []*url.URL
@@ -137,8 +136,8 @@ func init() {
 	rand.Seed(uint64(time.Now().UnixNano()))
 }
 
-// NewBoostService created a new BoostService
-func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
+// NewAnchorService created a new AnchorService
+func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 	if len(opts.Relays) == 0 {
 		return nil, errNoRelays
 	}
@@ -148,7 +147,7 @@ func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
 		return nil, err
 	}
 
-	return &BoostService{
+	return &AnchorService{
 		listenAddr:    opts.ListenAddr,
 		relays:        opts.Relays,
 		relayMonitors: opts.RelayMonitors,
@@ -180,7 +179,20 @@ func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
 	}, nil
 }
 
-func (m *BoostService) respondError(w http.ResponseWriter, code int, message string) {
+// Intended for testing only
+func (m *AnchorService) getNextMockNonce() uint64 {
+	nonce := m.mockCurrNonce
+	m.mockCurrNonce++
+	return nonce
+}
+
+func (m *AnchorService) incrNextMockNonce(delta uint64) uint64 {
+	nonce := m.mockCurrNonce
+	m.mockCurrNonce += delta
+	return nonce
+}
+
+func (m *AnchorService) respondError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	resp := httpErrorResp{code, message}
@@ -191,7 +203,7 @@ func (m *BoostService) respondError(w http.ResponseWriter, code int, message str
 }
 
 // note
-func (m *BoostService) respondOK(w http.ResponseWriter, response any) {
+func (m *AnchorService) respondOK(w http.ResponseWriter, response any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -200,7 +212,7 @@ func (m *BoostService) respondOK(w http.ResponseWriter, response any) {
 	}
 }
 
-func (m *BoostService) getRouter() http.Handler {
+func (m *AnchorService) getRouter() http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/", m.handleRoot)
 
@@ -221,7 +233,7 @@ func (m *BoostService) getRouter() http.Handler {
 }
 
 // StartHTTPServer starts the HTTP server for this boost service instance
-func (m *BoostService) StartHTTPServer() error {
+func (m *AnchorService) StartHTTPServer() error {
 	if m.srv != nil {
 		return errServerAlreadyRunning
 	}
@@ -247,7 +259,7 @@ func (m *BoostService) StartHTTPServer() error {
 	return err
 }
 
-func (m *BoostService) startBidCacheCleanupTask() {
+func (m *AnchorService) startBidCacheCleanupTask() {
 	for {
 		time.Sleep(1 * time.Minute)
 		m.bidsLock.Lock()
@@ -260,7 +272,7 @@ func (m *BoostService) startBidCacheCleanupTask() {
 	}
 }
 
-func (m *BoostService) sendValidatorRegistrationsToRelayMonitors(payload []builderApiV1.SignedValidatorRegistration) {
+func (m *AnchorService) sendValidatorRegistrationsToRelayMonitors(payload []builderApiV1.SignedValidatorRegistration) {
 	log := m.log.WithField("method", "sendValidatorRegistrationsToRelayMonitors").WithField("numRegistrations", len(payload))
 	for _, relayMonitor := range m.relayMonitors {
 		go func(relayMonitor *url.URL) {
@@ -276,7 +288,7 @@ func (m *BoostService) sendValidatorRegistrationsToRelayMonitors(payload []build
 	}
 }
 
-// func (m *BoostService) sendAuctionTranscriptToRelayMonitors(transcript *AuctionTranscript) {
+// func (m *AnchorService) sendAuctionTranscriptToRelayMonitors(transcript *AuctionTranscript) {
 // 	log := m.log.WithField("method", "sendAuctionTranscriptToRelayMonitors")
 // 	for _, relayMonitor := range m.relayMonitors {
 // 		go func(relayMonitor *url.URL) {
@@ -292,13 +304,13 @@ func (m *BoostService) sendValidatorRegistrationsToRelayMonitors(payload []build
 // 	}
 // }
 
-func (m *BoostService) handleRoot(w http.ResponseWriter, _ *http.Request) {
+func (m *AnchorService) handleRoot(w http.ResponseWriter, _ *http.Request) {
 	m.respondOK(w, nilResponse)
 }
 
 // handleStatus sends calls to the status endpoint of every relay.
 // It returns OK if at least one returned OK, and returns error otherwise.
-func (m *BoostService) handleStatus(w http.ResponseWriter, _ *http.Request) {
+func (m *AnchorService) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set(HeaderKeyVersion, config.Version)
 	if !m.relayCheck || m.CheckRelays() > 0 {
 		m.respondOK(w, nilResponse)
@@ -308,7 +320,7 @@ func (m *BoostService) handleStatus(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleRegisterValidator - returns 200 if at least one relay returns 200, else 502
-func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.Request) {
+func (m *AnchorService) handleRegisterValidator(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "registerValidator")
 	log.Debug("registerValidator")
 
@@ -354,7 +366,7 @@ func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.
 }
 
 // Original
-func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
+func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	slot := vars["slot"]
 	parentHashHex := vars["parent_hash"]
@@ -560,7 +572,7 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 }
 
 // Mock implementation
-func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request) {
+func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Request) {
 	//TODO: everytime this function is called, we need mock chunks
 	// generate mock chunks' headers(Baton would generate headers for mock chunks) and return them back to seq
 
@@ -612,13 +624,13 @@ func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request
 
 	m.mockExpectedSlot = _slot
 	// populated ToB chunk of SEQ block with the 1 chunk made above
-	m.mockChunkToB = CreateRandomTransactions(nonce, numToBTxs)
+	m.mockChunkToB = CreateRandomTransactions(m.getNextMockNonce(), numToBTxs)
 
 	// populated RoB chunks by numRoBChains(counter for how many RoB chunks are in SEQ block)
 	// and then creates random txs for those RoB chunks
 	m.mockChunkRoB = make(map[string][]hexutil.Bytes)
 	for i := 0; i < int(numRoBChains); i++ {
-		mockRoBTxs := CreateRandomTransactions(nonce, numRoBChunkTxs)
+		mockRoBTxs := CreateRandomTransactions(m.incrNextMockNonce(numRoBChunkTxs), numRoBChunkTxs)
 		chainID := "chain_" + strconv.Itoa(i)
 		m.mockChunkRoB[chainID] = mockRoBTxs
 	}
@@ -626,6 +638,9 @@ func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request
 	// sending the response to SEQ awaiting signature
 	var res SEQHeaderResponse
 	res.Slot = _slot
+
+	// Note for mocking this is just a random header we send back to SEQ, and, while we expect them to sign
+	// it, we don't do any additional checking on the signature. Possibly might change in the future.
 	res.ToBHash = PopulateRandomHash32()
 
 	// generate a random header hash  per RoB chunk
@@ -634,17 +649,15 @@ func (m *BoostService) handleGetHeader2(w http.ResponseWriter, req *http.Request
 			log.Fatal("Zero-sized chunk ended up in RoB with key: " + k)
 		}
 
-		for _ = range v {
-			headerHash := PopulateRandomHash32()
-			res.RoBHashes[k] = append(res.RoBHashes[k], headerHash)
-		}
+		chunkHash := PopulateRandomHash32()
+		res.RoBHashes[k] = chunkHash
 	}
 
 	m.respondOK(w, res)
 }
 
 // note: receive payload from Baton first, then we verify the payload and send to SEQ
-func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, payload *eth2ApiV1Capella.SignedBlindedBeaconBlock, body []byte) {
+func (m *AnchorService) processCapellaPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, payload *eth2ApiV1Capella.SignedBlindedBeaconBlock, body []byte) {
 	if payload.Message == nil || payload.Message.Body == nil || payload.Message.Body.ExecutionPayloadHeader == nil {
 		log.WithField("body", string(body)).Error("missing parts of the request payload from the beacon-node")
 		m.respondError(w, http.StatusBadRequest, "missing parts of the payload")
@@ -781,7 +794,7 @@ func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Re
 	m.respondOK(w, result)
 }
 
-func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, blindedBlock *eth2ApiV1Deneb.SignedBlindedBeaconBlock) {
+func (m *AnchorService) processDenebPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, blindedBlock *eth2ApiV1Deneb.SignedBlindedBeaconBlock) {
 	// Get the currentSlotUID for this slot
 	currentSlotUID := ""
 	m.slotUIDLock.Lock()
@@ -923,7 +936,7 @@ func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Requ
 }
 
 // original implementation
-func (m *BoostService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
+func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
 	log.Debug("getPayload request starts")
 
@@ -953,7 +966,7 @@ func (m *BoostService) handleGetPayload(w http.ResponseWriter, req *http.Request
 
 // Mock custom handler. Note this is a true mock. It does no checking of the info
 // received from SEQ and just sends the payload back.
-func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Request) {
+func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
 	log.Debug("getPayload request starts")
 
@@ -965,6 +978,7 @@ func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
+	// Note we don't verify any of the signatures here for now since it is mocked. Might change later.
 	var payloadReq SEQPayloadRequest
 	err = payloadReq.FromJSON(body)
 	if err != nil {
@@ -979,18 +993,6 @@ func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Reques
 		m.respondError(w, http.StatusBadRequest, errorMsg)
 	}
 
-	// type SEQPayloadResponse struct {
-	// 	Slot        uint64                        `json:"slot"`
-	// 	ToBPayload  ExecutionPayload2            `json:"tobpayload"`
-	// 	RoBPayloads map[string]ExecutionPayload2 `json:"robpayloads"`
-	// }
-	// type SEQPayloadRequest struct {
-	// 	Slot                   uint64                                     `json:"slot"`
-	// 	ToBBlindedBeaconBlock  AnchorSignedBlindedBeaconBlock            `json:"tobblindedbeaconblock"`
-	// 	RoBBlindedBeaconBlocks map[string]AnchorSignedBlindedBeaconBlock `json:"robblindedbeaconblocks"`
-	// }
-
-	// TODO: Populate blockhash if needed later
 	// TODO: Add new function for SEQPayloadResponse
 	var res SEQPayloadResponse
 	res.Slot = payloadReq.Slot
@@ -1013,7 +1015,7 @@ func (m *BoostService) handleGetPayload2(w http.ResponseWriter, req *http.Reques
 	m.respondOK(w, resBody)
 }
 
-func (m *BoostService) handleOPGetPayload2(w http.ResponseWriter, req *http.Request) {
+func (m *AnchorService) handleOPGetPayload2(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
 	log.Debug("getPayload request starts")
 
@@ -1214,7 +1216,7 @@ func (m *BoostService) handleOPGetPayload2(w http.ResponseWriter, req *http.Requ
 	m.respondOK(w, res)
 }
 
-func (m *BoostService) handleOPGetPayload(w http.ResponseWriter, req *http.Request) {
+func (m *AnchorService) handleOPGetPayload(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
 	log.Debug("getPayload request starts")
 
@@ -1431,7 +1433,7 @@ type SEQResponse struct {
 }
 
 // TODO:
-func (m *BoostService) GetSEQTransaction(args SubmitMsgTxArgs) ([]*chain.Transaction, error) {
+func (m *AnchorService) GetSEQTransaction(args SubmitMsgTxArgs) ([]*chain.Transaction, error) {
 
 	// ctx := context.Background()
 
@@ -1527,7 +1529,7 @@ func (m *BoostService) GetSEQTransaction(args SubmitMsgTxArgs) ([]*chain.Transac
 }
 
 // CheckRelays sends a request to each one of the relays previously registered to get their status
-func (m *BoostService) CheckRelays() int {
+func (m *AnchorService) CheckRelays() int {
 	var wg sync.WaitGroup
 	var numSuccessRequestsToRelay uint32
 
@@ -1582,7 +1584,7 @@ func (*ServerParser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *BoostService) ServerParser(ctx context.Context, networkId uint32, chainId ids.ID) chain.Parser {
+func (m *AnchorService) ServerParser(ctx context.Context, networkId uint32, chainId ids.ID) chain.Parser {
 	//g := j.c.Genesis()
 
 	// The only thing this is using is the ActionRegistry and AuthRegistry so this should be fine
@@ -1609,7 +1611,7 @@ func (*Parser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 	return consts.ActionRegistry, consts.AuthRegistry
 }
 
-func (m *BoostService) Parser(ctx context.Context, networkID uint32, chainId ids.ID) (chain.Parser, error) {
+func (m *AnchorService) Parser(ctx context.Context, networkID uint32, chainId ids.ID) (chain.Parser, error) {
 
 	return &Parser{networkID, chainId, nil}, nil
 }

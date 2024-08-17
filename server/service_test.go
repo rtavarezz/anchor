@@ -34,7 +34,7 @@ import (
 )
 
 type testBackend struct {
-	boost  *BoostService
+	boost  *AnchorService
 	relays []*mockRelay
 }
 
@@ -52,7 +52,7 @@ func newTestBackend(t *testing.T, numRelays int, relayTimeout time.Duration) *te
 		relayEntries[i] = backend.relays[i].RelayEntry
 	}
 
-	opts := BoostServiceOpts{
+	opts := AnchorServiceOpts{
 		Log:                      testLog,
 		ListenAddr:               "localhost:12345",
 		Relays:                   relayEntries,
@@ -64,7 +64,7 @@ func newTestBackend(t *testing.T, numRelays int, relayTimeout time.Duration) *te
 		RequestTimeoutRegVal:     relayTimeout,
 		RequestMaxRetries:        5,
 	}
-	service, err := NewBoostService(opts)
+	service, err := NewAnchorService(opts)
 	require.NoError(t, err)
 
 	backend.boost = service
@@ -146,7 +146,7 @@ func blindedBlockContentsToPayloadDeneb(signedBlindedBlockContents *eth2ApiV1Den
 
 func TestNewBoostServiceErrors(t *testing.T) {
 	t.Run("errors when no relays", func(t *testing.T) {
-		_, err := NewBoostService(BoostServiceOpts{
+		_, err := NewAnchorService(AnchorServiceOpts{
 			Log:                      testLog,
 			ListenAddr:               ":123",
 			Relays:                   []RelayEntry{},

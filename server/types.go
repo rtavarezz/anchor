@@ -181,9 +181,9 @@ type SEQHeaderResponse struct {
 	// block builder address
 	PriorityFeeReceiverAddr codec.Address `json:"priorityfeereceiveraddr"`
 	// hash of the anchor chunks (tob + robs)
-	ChunkHash phase0.Hash32              `json:"chunkhash"`
-	ToBHash   phase0.Hash32              `json:"tobhash"`
-	RoBHashes map[string][]phase0.Hash32 `json:"robhashes"`
+	ChunkHash phase0.Hash32            `json:"chunkhash"`
+	ToBHash   phase0.Hash32            `json:"tobhash"`
+	RoBHashes map[string]phase0.Hash32 `json:"robhashes"`
 }
 
 // Request from SEQ for the payload
@@ -217,7 +217,7 @@ type AnchorBlindedBeaconBlockBody struct {
 	ExecutionPayloadHeader *AnchorExecutionPayloadHeader
 }
 
-// recieving payload from SEQ
+// receiving payload from SEQ
 type AnchorExecutionPayloadHeader struct {
 	FeeRecipient     bellatrix.ExecutionAddress `ssz-size:"20"`
 	StateRoot        [32]byte                   `ssz-size:"32"`
