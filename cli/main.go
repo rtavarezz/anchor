@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/flashbots/go-boost-utils/types"
 	"os"
 	"strings"
 	"time"
@@ -64,6 +65,7 @@ var (
 	logDebug     = flag.Bool("debug", defaultDebug, "shorthand for '-loglevel debug'")
 	logService   = flag.String("log-service", defaultLogServiceTag, "add a 'service=...' tag to all log messages")
 	logNoVersion = flag.Bool("log-no-version", defaultDisableLogVersion, "disables adding the version to every log entry")
+	mockMode     = flag.Bool("mock-mode", false, "when toggled, anchor just uses the mock functionality")
 
 	listenAddr       = flag.String("addr", defaultListenAddr, "listen-address for mev-boost server")
 	relayURLs        = flag.String("relays", defaultRelays, "relay urls - single entry or comma-separated list (scheme://pubkey@host)")
@@ -138,57 +140,61 @@ func Main() {
 		genesisTime = uint64(*useCustomGenesisTime)
 	}
 
-	// For backwards compatibility with the -relays flag.
-	if *relayURLs != "" {
-		for _, relayURL := range strings.Split(*relayURLs, ",") {
-			err := relays.Set(strings.TrimSpace(relayURL))
-			if err != nil {
-				log.WithError(err).WithField("relay", relayURL).Fatal("Invalid relay URL")
+	var relayMinBidWei *types.U256Str
+
+	if !*mockMode {
+		// For backwards compatibility with the -relays flag.
+		if *relayURLs != "" {
+			for _, relayURL := range strings.Split(*relayURLs, ",") {
+				err := relays.Set(strings.TrimSpace(relayURL))
+				if err != nil {
+					log.WithError(err).WithField("relay", relayURL).Fatal("Invalid relay URL")
+				}
 			}
 		}
-	}
 
-	if len(relays) == 0 {
-		flag.Usage()
-		log.Fatal("no relays specified")
-	}
-	log.Infof("using %d relays", len(relays))
-	for index, relay := range relays {
-		log.Infof("relay #%d: %s", index+1, relay.String())
-	}
+		if len(relays) == 0 {
+			flag.Usage()
+			log.Fatal("no relays specified")
+		}
+		log.Infof("using %d relays", len(relays))
+		for index, relay := range relays {
+			log.Infof("relay #%d: %s", index+1, relay.String())
+		}
 
-	// For backwards compatibility with the -relay-monitors flag.
-	if *relayMonitorURLs != "" {
-		for _, relayMonitorURL := range strings.Split(*relayMonitorURLs, ",") {
-			err := relayMonitors.Set(strings.TrimSpace(relayMonitorURL))
-			if err != nil {
-				log.WithError(err).WithField("relayMonitor", relayMonitorURL).Fatal("Invalid relay monitor URL")
+		// For backwards compatibility with the -relay-monitors flag.
+		if *relayMonitorURLs != "" {
+			for _, relayMonitorURL := range strings.Split(*relayMonitorURLs, ",") {
+				err := relayMonitors.Set(strings.TrimSpace(relayMonitorURL))
+				if err != nil {
+					log.WithError(err).WithField("relayMonitor", relayMonitorURL).Fatal("Invalid relay monitor URL")
+				}
 			}
 		}
-	}
 
-	if len(relayMonitors) > 0 {
-		log.Infof("using %d relay monitors", len(relayMonitors))
-		for index, relayMonitor := range relayMonitors {
-			log.Infof("relay-monitor #%d: %s", index+1, relayMonitor.String())
+		if len(relayMonitors) > 0 {
+			log.Infof("using %d relay monitors", len(relayMonitors))
+			for index, relayMonitor := range relayMonitors {
+				log.Infof("relay-monitor #%d: %s", index+1, relayMonitor.String())
+			}
 		}
-	}
 
-	if *relayMinBidEth < 0.0 {
-		log.Fatal("Please specify a non-negative minimum bid")
-	}
+		if *relayMinBidEth < 0.0 {
+			log.Fatal("Please specify a non-negative minimum bid")
+		}
 
-	if *relayMinBidEth > 1000000.0 {
-		log.Fatal("Minimum bid is too large, please ensure min-bid is denominated in Ethers")
-	}
+		if *relayMinBidEth > 1000000.0 {
+			log.Fatal("Minimum bid is too large, please ensure min-bid is denominated in Ethers")
+		}
 
-	if *relayMinBidEth > 0.0 {
-		log.Infof("minimum bid: %v eth", *relayMinBidEth)
-	}
+		if *relayMinBidEth > 0.0 {
+			log.Infof("minimum bid: %v eth", *relayMinBidEth)
+		}
 
-	relayMinBidWei, err := common.FloatEthTo256Wei(*relayMinBidEth)
-	if err != nil {
-		log.WithError(err).Fatal("failed converting min bid")
+		relayMinBidWei, err = common.FloatEthTo256Wei(*relayMinBidEth)
+		if err != nil {
+			log.WithError(err).Fatal("failed converting min bid")
+		}
 	}
 
 	opts := server.AnchorServiceOpts{
@@ -204,6 +210,7 @@ func Main() {
 		RequestTimeoutGetPayload: time.Duration(*relayTimeoutMsGetPayload) * time.Millisecond,
 		RequestTimeoutRegVal:     time.Duration(*relayTimeoutMsRegVal) * time.Millisecond,
 		RequestMaxRetries:        *relayRequestMaxRetries,
+		MockMode:                 *mockMode,
 	}
 	service, err := server.NewAnchorService(opts)
 	if err != nil {

@@ -97,6 +97,8 @@ type AnchorServiceOpts struct {
 	RequestTimeoutGetPayload time.Duration
 	RequestTimeoutRegVal     time.Duration
 	RequestMaxRetries        int
+
+  MockMode              bool
 }
 
 // AnchorService - the mev-boost service
@@ -125,6 +127,7 @@ type AnchorService struct {
 	slotUIDLock sync.Mutex
 
 	// Below used only for testing
+  mockMode         bool
 	mockChunkToB     []hexutil.Bytes
 	mockChunkRoB     map[string][]hexutil.Bytes
 	mockCurrNonce    uint64
@@ -176,6 +179,7 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 			CheckRedirect: httpClientDisallowRedirects,
 		},
 		requestMaxRetries: opts.RequestMaxRetries,
+    mockMode: opts.MockMode,
 	}, nil
 }
 

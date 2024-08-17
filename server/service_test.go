@@ -903,3 +903,18 @@ func TestGetPayloadToAllRelays(t *testing.T) {
 	require.Equal(t, 1, backend.relays[0].GetRequestCount(getPayloadPath))
 	require.Equal(t, 1, backend.relays[1].GetRequestCount(getPayloadPath))
 }
+
+func TestMockAnchor(t *testing.T) {
+	hash := _HexToHash("0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7")
+	pubkey := _HexToPubkey(
+		"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249")
+	path := getHeaderPath(1, hash, pubkey)
+	require.Equal(t, "/eth/v1/builder/header/1/0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7/0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249", path)
+
+	t.Run("Okay response from relay", func(t *testing.T) {
+		backend := newTestBackend(t, 1, time.Second)
+		rr := backend.request(t, http.MethodGet, path, nil)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
+	})
+}
