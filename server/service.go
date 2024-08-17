@@ -52,6 +52,11 @@ var (
 	errInvalidPubkey             = errors.New("invalid pubkey")
 	errNoSuccessfulRelayResponse = errors.New("no successful relay response")
 	errServerAlreadyRunning      = errors.New("server already running")
+	errInvalidToBTxs			 = errors.New("invalid ToBTxs")
+	errInvalidRoBChains			 = errors.New("invalid RoBChains")
+	errInvalidRoBChunkTxs	     = errors.New("invalid RoBChunkTxs")
+
+
 )
 
 var (
@@ -583,44 +588,45 @@ func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Reques
 	// parsing SEQHeaderRequest
 	vars := mux.Vars(req)
 
-	slot := vars["Slot"]
+	slot := vars["slot"]
 	_slot, err := strconv.ParseUint(slot, 10, 64)
+	fmt.Printf("slot: %s\n", slot)
 	if err != nil {
 		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
 		return
 	}
 
 	// Optional param, numToBTxs indicates the number of txs in the ToB chunk
-	numToBTxsToken, ok := vars["NumToBTxs"]
+	numToBTxsToken, ok := vars["numtobtxs"]
 	numToBTxs := uint64(1)
 	if ok {
 		_numToBTxs, err := strconv.ParseUint(numToBTxsToken, 10, 32)
 		if err != nil {
-			m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+			m.respondError(w, http.StatusBadRequest, errInvalidToBTxs.Error())
 			return
 		}
 		numToBTxs = _numToBTxs
 	}
 
 	// Optional param, NumRoBChains indicates the number of chunks in the RoB
-	numRoBChainsToken, ok := vars["NumRoBChains"]
+	numRoBChainsToken, ok := vars["numrobchains"]
 	numRoBChains := uint64(1)
 	if ok {
 		_numRoBChains, err := strconv.ParseUint(numRoBChainsToken, 10, 32)
 		if err != nil {
-			m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+			m.respondError(w, http.StatusBadRequest, errInvalidRoBChains.Error())
 			return
 		}
 		numRoBChains = _numRoBChains
 	}
 
 	// Optional param, NumRoBChunkTxs indicates the number of chunk
-	numRoBChunkTxsToken, ok := vars["NumRoBChunkTxs"]
+	numRoBChunkTxsToken, ok := vars["numrobchunktxs"]
 	numRoBChunkTxs := uint64(1)
 	if ok {
 		_numRoBChunkTxs, err := strconv.ParseUint(numRoBChunkTxsToken, 10, 32)
 		if err != nil {
-			m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
+			m.respondError(w, http.StatusBadRequest, errInvalidRoBChunkTxs.Error())
 			return
 		}
 		numRoBChunkTxs = _numRoBChunkTxs

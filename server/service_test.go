@@ -312,6 +312,10 @@ func getHeaderPath(slot uint64, parentHash phase0.Hash32, pubkey phase0.BLSPubKe
 	return fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.String(), pubkey.String())
 }
 
+func getHeaderPath2(slot uint64, parentHash phase0.Hash32, pubkey phase0.BLSPubKey, numtobtxs int, numrobchains int, numrobchunktxs int) string {
+	return fmt.Sprintf("/eth/v1/builder/header2/%d/%s/%s/%d/%d/%d", slot, parentHash.String(), pubkey.String(), numtobtxs, numrobchains, numrobchunktxs)
+}
+
 func TestGetHeader(t *testing.T) {
 	hash := _HexToHash("0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7")
 	pubkey := _HexToPubkey(
@@ -908,13 +912,31 @@ func TestMockAnchor(t *testing.T) {
 	hash := _HexToHash("0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7")
 	pubkey := _HexToPubkey(
 		"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249")
-	path := getHeaderPath(1, hash, pubkey)
-	require.Equal(t, "/eth/v1/builder/header/1/0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7/0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249", path)
+	numTobTxs := 3
+	numRoBChains := 3
+	numRoBChunkTxs := 4
+	path := getHeaderPath2(1, hash, pubkey, numTobTxs, numRoBChains, numRoBChunkTxs)
+	// require.Equal(t, "/eth/v1/builder/header/1/0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7/0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249", path)
+	backend := newTestBackend(t, 1, time.Second)
+	rr := backend.request(t, http.MethodGet, path, nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var testResponse SEQHeaderResponse
+	err := testResponse.FromJSON(rr.Body.Bytes())
+	require.NoError(t, err)
+	// print when testing
+	// type SEQHeaderResponse struct {
+	// 	Slot uint64 `json:"slot"`
+	// 	// nodeID of chunk producing validator.
+	// 	Producer ids.NodeID `json:"producer"`
+	// 	// block builder address
+	// 	PriorityFeeReceiverAddr codec.Address `json:"priorityfeereceiveraddr"`
+	// 	// hash of the anchor chunks (tob + robs)
+	// 	ChunkHash phase0.Hash32            `json:"chunkhash"`
+	// 	ToBHash   phase0.Hash32            `json:"tobhash"`
+	// 	RoBHashes map[string]phase0.Hash32 `json:"robhashes"`
+	// }
+	require.Equal(t, 1, testResponse.Slot)
+	
 
-	t.Run("Okay response from relay", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second)
-		rr := backend.request(t, http.MethodGet, path, nil)
-		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
-		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
-	})
+
 }

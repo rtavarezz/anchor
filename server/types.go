@@ -248,3 +248,12 @@ func (r *SEQPayloadResponse) ToJSON() ([]byte, error) {
 func (r *SEQPayloadResponse) FromJSON(data []byte) error {
 	return json.Unmarshal(data, r)
 }
+
+func (r *SEQHeaderRequest) ToJSON() ([]byte, error) {
+	return json.Marshal(r)
+}
+
+// SEQHeaderResponse Deserialization
+func (r *SEQHeaderResponse) FromJSON(data []byte) error {
+	return json.Unmarshal(data, r)
+}
