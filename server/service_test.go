@@ -316,6 +316,10 @@ func getHeaderPath2(slot uint64, parentHash phase0.Hash32, pubkey phase0.BLSPubK
 	return fmt.Sprintf("/eth/v1/builder/header2/%d/%s/%s/%d/%d/%d", slot, parentHash.String(), pubkey.String(), numtobtxs, numrobchains, numrobchunktxs)
 }
 
+func getPayloadPath2() string {
+	return fmt.Sprintf("/eth/v1/builder/blinded_blocks2")
+}
+
 func TestGetHeader(t *testing.T) {
 	hash := _HexToHash("0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7")
 	pubkey := _HexToPubkey(
@@ -915,28 +919,32 @@ func TestMockAnchor(t *testing.T) {
 	numTobTxs := 3
 	numRoBChains := 3
 	numRoBChunkTxs := 4
+
 	path := getHeaderPath2(1, hash, pubkey, numTobTxs, numRoBChains, numRoBChunkTxs)
-	// require.Equal(t, "/eth/v1/builder/header/1/0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7/0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249", path)
 	backend := newTestBackend(t, 1, time.Second)
 	rr := backend.request(t, http.MethodGet, path, nil)
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
 	var testResponse SEQHeaderResponse
 	err := testResponse.FromJSON(rr.Body.Bytes())
 	require.NoError(t, err)
-	// print when testing
-	// type SEQHeaderResponse struct {
-	// 	Slot uint64 `json:"slot"`
-	// 	// nodeID of chunk producing validator.
-	// 	Producer ids.NodeID `json:"producer"`
-	// 	// block builder address
-	// 	PriorityFeeReceiverAddr codec.Address `json:"priorityfeereceiveraddr"`
-	// 	// hash of the anchor chunks (tob + robs)
-	// 	ChunkHash phase0.Hash32            `json:"chunkhash"`
-	// 	ToBHash   phase0.Hash32            `json:"tobhash"`
-	// 	RoBHashes map[string]phase0.Hash32 `json:"robhashes"`
-	// }
-	require.Equal(t, 1, testResponse.Slot)
-	
 
+	require.Equal(t, 1, int(testResponse.Slot))
+	require.Equal(t, numRoBChains, len(testResponse.RoBHashes))
 
+	payloadReq := NewSEQPayloadRequest(1)
+
+	path2 := getPayloadPath2()
+	rr2 := backend.request(t, http.MethodPost, path2, payloadReq)
+	require.Equal(t, http.StatusOK, rr2.Code, rr2.Body.String())
+
+	var testPayloadRes SEQPayloadResponse
+	err = testPayloadRes.FromJSON(rr2.Body.Bytes())
+	require.NoError(t, err)
+
+	require.Equal(t, numTobTxs, len(testPayloadRes.ToBPayload.Transactions))
+	require.Equal(t, numRoBChains, len(testPayloadRes.RoBPayloads))
+	for _, v := range testPayloadRes.RoBPayloads {
+		require.Equal(t, numRoBChunkTxs, len(v.Transactions))
+	}
 }

@@ -52,11 +52,9 @@ var (
 	errInvalidPubkey             = errors.New("invalid pubkey")
 	errNoSuccessfulRelayResponse = errors.New("no successful relay response")
 	errServerAlreadyRunning      = errors.New("server already running")
-	errInvalidToBTxs			 = errors.New("invalid ToBTxs")
-	errInvalidRoBChains			 = errors.New("invalid RoBChains")
-	errInvalidRoBChunkTxs	     = errors.New("invalid RoBChunkTxs")
-
-
+	errInvalidToBTxs             = errors.New("invalid ToBTxs")
+	errInvalidRoBChains          = errors.New("invalid RoBChains")
+	errInvalidRoBChunkTxs        = errors.New("invalid RoBChunkTxs")
 )
 
 var (
@@ -103,7 +101,7 @@ type AnchorServiceOpts struct {
 	RequestTimeoutRegVal     time.Duration
 	RequestMaxRetries        int
 
-  MockMode              bool
+	MockMode bool
 }
 
 // AnchorService - the mev-boost service
@@ -132,7 +130,7 @@ type AnchorService struct {
 	slotUIDLock sync.Mutex
 
 	// Below used only for testing
-  mockMode         bool
+	mockMode         bool
 	mockChunkToB     []hexutil.Bytes
 	mockChunkRoB     map[string][]hexutil.Bytes
 	mockCurrNonce    uint64
@@ -184,7 +182,7 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 			CheckRedirect: httpClientDisallowRedirects,
 		},
 		requestMaxRetries: opts.RequestMaxRetries,
-    mockMode: opts.MockMode,
+		mockMode:          opts.MockMode,
 	}, nil
 }
 
@@ -646,8 +644,7 @@ func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Reques
 	}
 
 	// sending the response to SEQ awaiting signature
-	var res SEQHeaderResponse
-	res.Slot = _slot
+	res := NewSEQHeaderResponse(_slot)
 
 	// Note for mocking this is just a random header we send back to SEQ, and, while we expect them to sign
 	// it, we don't do any additional checking on the signature. Possibly might change in the future.
@@ -1003,8 +1000,7 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 		m.respondError(w, http.StatusBadRequest, errorMsg)
 	}
 
-	// TODO: Add new function for SEQPayloadResponse
-	var res SEQPayloadResponse
+	res := NewSEQPayloadResponse(payloadReq.Slot)
 	res.Slot = payloadReq.Slot
 	res.ToBPayload.Transactions = m.mockChunkToB
 
@@ -1015,14 +1011,7 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 		}
 	}
 
-	resBody, err2 := res.ToJSON()
-	if err2 != nil {
-		log.WithError(err).Error("could not serialize res response")
-		m.respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	m.respondOK(w, resBody)
+	m.respondOK(w, res)
 }
 
 func (m *AnchorService) handleOPGetPayload2(w http.ResponseWriter, req *http.Request) {

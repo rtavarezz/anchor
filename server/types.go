@@ -186,6 +186,13 @@ type SEQHeaderResponse struct {
 	RoBHashes map[string]phase0.Hash32 `json:"robhashes"`
 }
 
+func NewSEQHeaderResponse(slot uint64) SEQHeaderResponse {
+	return SEQHeaderResponse{
+		Slot:      slot,
+		RoBHashes: make(map[string]phase0.Hash32),
+	}
+}
+
 // Request from SEQ for the payload
 type SEQPayloadRequest struct {
 	Slot                   uint64                                    `json:"slot"`
@@ -193,11 +200,25 @@ type SEQPayloadRequest struct {
 	RoBBlindedBeaconBlocks map[string]AnchorSignedBlindedBeaconBlock `json:"robblindedbeaconblocks"`
 }
 
+func NewSEQPayloadRequest(slot uint64) SEQPayloadRequest {
+	return SEQPayloadRequest{
+		Slot:                   slot,
+		RoBBlindedBeaconBlocks: make(map[string]AnchorSignedBlindedBeaconBlock),
+	}
+}
+
 // Send this back to SEQ
 type SEQPayloadResponse struct {
 	Slot        uint64                       `json:"slot"`
 	ToBPayload  ExecutionPayload2            `json:"tobpayload"`
 	RoBPayloads map[string]ExecutionPayload2 `json:"robpayloads"`
+}
+
+func NewSEQPayloadResponse(slot uint64) SEQPayloadResponse {
+	return SEQPayloadResponse{
+		Slot:        slot,
+		RoBPayloads: make(map[string]ExecutionPayload2),
+	}
 }
 
 type AnchorSignedBlindedBeaconBlock struct {
