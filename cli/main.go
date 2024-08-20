@@ -197,6 +197,11 @@ func Main() {
 		}
 	}
 
+	var relayMinBidWeiSetting types.U256Str
+	if relayMinBidWei != nil {
+		relayMinBidWeiSetting = *relayMinBidWei
+	}
+
 	opts := server.AnchorServiceOpts{
 		Log:                      log,
 		ListenAddr:               *listenAddr,
@@ -205,7 +210,7 @@ func Main() {
 		GenesisForkVersionHex:    genesisForkVersionHex,
 		GenesisTime:              genesisTime,
 		RelayCheck:               *relayCheck,
-		RelayMinBid:              *relayMinBidWei,
+		RelayMinBid:              relayMinBidWeiSetting,
 		RequestTimeoutGetHeader:  time.Duration(*relayTimeoutMsGetHeader) * time.Millisecond,
 		RequestTimeoutGetPayload: time.Duration(*relayTimeoutMsGetPayload) * time.Millisecond,
 		RequestTimeoutRegVal:     time.Duration(*relayTimeoutMsRegVal) * time.Millisecond,

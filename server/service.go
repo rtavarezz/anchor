@@ -144,7 +144,7 @@ func init() {
 
 // NewAnchorService created a new AnchorService
 func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
-	if len(opts.Relays) == 0 {
+	if !opts.MockMode && len(opts.Relays) == 0 {
 		return nil, errNoRelays
 	}
 
