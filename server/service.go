@@ -164,7 +164,7 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 		return nil, err
 	}
 
-	seqCli, err := seq.NewSeqClient(seqSigningKey, config.SeqChainID, uint32(config.SeqNetworkID), seqChainID)
+	seqCli, err := seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
 	if err != nil {
 		return nil, err
 	}

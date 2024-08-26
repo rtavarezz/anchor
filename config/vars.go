@@ -35,7 +35,7 @@ var (
 
 	// Seq related fields
 	SeqSigningKey = common.GetEnv("SEQ_KEY", "323b1d8f4eed5f0da9da93071b034f2dce9d2d22692c172f3cb252a64ddfafd01b057de320297c29ad0c1f589ea216869cf1938d88c9fbd70d6748323dbf2fa7") // ed25519 private key hex
-	SeqURI        = common.GetEnv("SEQ_URI", "http://127.0.0.1:9652/ext/bc/2GzsD6nCJ5nRrhFAbCF16hYPFJ3VJUUUqyyJfHXckSxkyturkH")
-	SeqChainID    = common.GetEnv("SEQ_CHAIN_ID", "2GzsD6nCJ5nRrhFAbCF16hYPFJ3VJUUUqyyJfHXckSxkyturkH")
+	SeqURI        = common.GetEnv("SEQ_URI", "http://127.0.0.1:9656/ext/bc/2ovyyykSRhNQr3q8kZLsKwKuf1zW26cykpa8wcDN4XETxectxd")
+	SeqChainID    = common.GetEnv("SEQ_CHAIN_ID", "2ovyyykSRhNQr3q8kZLsKwKuf1zW26cykpa8wcDN4XETxectxd")
 	SeqNetworkID  = common.GetEnvInt("SEQ_NETWORK_ID", 1337)
 )
