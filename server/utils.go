@@ -342,11 +342,37 @@ func CreateRandomTransactions(nonce uint64, numTxs uint64) []hexutil.Bytes {
 	return list
 }
 
-func PopulateRandomHash32() phase0.Hash32 {
+func PopulateRandomHash32() common.Hash {
 	var data [32]byte
 	_, err := rand.Read(data[:])
 	if err != nil {
 		log.Fatalf("Failed to generate random data: %v", err)
 	}
 	return data
+}
+
+// Verifies that a given header is good
+func VerifyHeader(header *AnchorHeader, relayMinBid *big.Int, log *logrus.Entry) bool {
+	if header.Header == nil {
+		log.Info("header due to nil header")
+		return false
+	}
+
+	if header.BlockHash == "" {
+		log.Info("header [%s] due to empty block hash", header.Header.String())
+		return false
+	}
+
+	if header.Value == nil || header.Value.Uint64() == 0 {
+		log.Info("header [%s] due to zero or missing value", header.Header.String())
+		return false
+	}
+
+	// Skip if value (fee) is lower than the minimum bid
+	if header.Value.Cmp(relayMinBid) == -1 {
+		log.Info("header [%s] ignoring bid below min-bid value", header.Header.String())
+		return false
+	}
+
+	return true
 }

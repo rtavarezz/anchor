@@ -1,12 +1,12 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
 	"io"
 	"log"
 	"math/big"
@@ -27,15 +27,10 @@ import (
 	"github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
-	boostUtils "github.com/flashbots/go-boost-utils/utils"
-
 	"github.com/AnomalyFi/anchor/config"
-	builderApi "github.com/attestantio/go-builder-client/api"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	eth2ApiV1Bellatrix "github.com/attestantio/go-eth2-client/api/v1/bellatrix"
-	eth2ApiV1Capella "github.com/attestantio/go-eth2-client/api/v1/capella"
-	eth2ApiV1Deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/flashbots/go-boost-utils/ssz"
 	flash "github.com/flashbots/go-boost-utils/types"
@@ -66,6 +61,7 @@ var (
 
 var (
 	nilHash     = phase0.Hash32{}
+	nilHash2    = common.Hash{}
 	nilResponse = struct{}{}
 )
 
@@ -122,8 +118,8 @@ type AnchorService struct {
 	httpClientRegVal       http.Client
 	requestMaxRetries      int
 
-	bids     map[bidRespKey]bidResp   // keeping track of bids, to log the originating relay on withholding
-	opBids   map[bidRespKey]opBidResp // keeping track of bids, to log the originating relay on withholding
+	bids     map[bidRespKey]SEQHeaderResponse // keeping track of bids, to log the originating relay on withholding
+	opBids   map[bidRespKey]opBidResp         // keeping track of bids, to log the originating relay on withholding
 	bidsLock sync.Mutex
 
 	slotUID     *slotUID
@@ -430,21 +426,26 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 	}
 
 	// Prepare relay responses
-	result := bidResp{}                           // the final response, containing the highest bid (if any)
+	result := NewSEQHeaderResponse(_slot)
+	batonResponse := new(AnchorGetHeaderResponse)
 	relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
+	var responseIsGood atomic.Bool
 
-	// Call the relays
+	// Forward the request to Baton. For now, there will be a single instance of Baton.
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, relay := range m.relays {
 		wg.Add(1)
+
+		// TODO: Since we know there is only a single Baton instance. We could probably cut out the goroutine.
 		go func(relay RelayEntry) {
 			defer wg.Done()
 			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashHex, pubkey)
 			url := relay.GetURI(path)
 			log := log.WithField("url", url)
-			responsePayload := new(builderSpec.VersionedSignedBuilderBid)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, responsePayload)
+
+			//batonResponse := new(builderSpec.VersionedSignedBuilderBid)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, batonResponse)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
@@ -456,126 +457,138 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			}
 
 			// Skip if payload is empty
-			if responsePayload.IsEmpty() {
+			if batonResponse.IsEmpty() {
+				log.Warn("baton responded with empty header block")
 				return
 			}
 
-			// Getting the bid info will check if there are missing fields in the response
-			bidInfo, err := parseBidInfo(responsePayload)
-			if err != nil {
-				log.WithError(err).Warn("error parsing bid info")
+			hasToB := batonResponse.ExecPayloads.ToBHash != nil
+			if hasToB && *batonResponse.ExecPayloads.ToBHash.Header == nilHash2 {
+				log.Warn("baton responded with empty tob block hash")
 				return
 			}
 
-			if bidInfo.blockHash == nilHash {
-				log.Warn("relay responded with empty block hash")
-				return
+			var tobValue uint64
+			if hasToB {
+				tobValue = batonResponse.ExecPayloads.ToBHash.Value.Uint64()
 			}
 
-			valueEth := weiBigIntToEthBigFloat(bidInfo.value.ToBig())
+			var robValues string
+			for chainID, robChunk := range batonResponse.ExecPayloads.RoBHashes {
+				robValues = robValues + "[" + chainID + ":" + robChunk.Value.String() + "], "
+			}
+
 			log = log.WithFields(logrus.Fields{
-				"blockNumber": bidInfo.blockNumber,
-				"blockHash":   bidInfo.blockHash.String(),
-				"txRoot":      bidInfo.txRoot.String(),
-				"value":       valueEth.Text('f', 18),
+				"slot":       batonResponse.BlockInfo.Slot,
+				"chunk_hash": batonResponse.BlockInfo.ChunkHash,
+				"tob_value":  tobValue,
+				"rob_values": robValues,
 			})
 
-			if relay.PublicKey.String() != bidInfo.pubkey.String() {
-				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), bidInfo.pubkey.String())
-				return
-			}
+			/*
+				valueEth := weiBigIntToEthBigFloat(bidInfo.value.ToBig())
+			*/
 
-			// Verify the relay signature in the relay response
-			if !config.SkipRelaySignatureCheck {
-				ok, err := checkRelaySignature(responsePayload, m.builderSigningDomain, relay.PublicKey)
-				if err != nil {
-					log.WithError(err).Error("error verifying relay signature")
+			// TODO: This public key check seems like a good idea.
+			/*
+				if relay.PublicKey.String() != bidInfo.pubkey.String() {
+					log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), bidInfo.pubkey.String())
 					return
 				}
-				if !ok {
-					log.Error("failed to verify relay signature")
+
+				// Verify the relay signature in the relay response
+				if !config.SkipRelaySignatureCheck {
+					ok, err := checkRelaySignature(batonResponse, m.builderSigningDomain, relay.PublicKey)
+					if err != nil {
+						log.WithError(err).Error("error verifying relay signature")
+						return
+					}
+					if !ok {
+						log.Error("failed to verify relay signature")
+						return
+					}
+				}
+			*/
+
+			// @TODO: This parent hash check seems like a good idea. Add them back later?
+			/*
+				// Verify response coherence with proposer's input data
+				if bidInfo.parentHash.String() != parentHashHex {
+					log.WithFields(logrus.Fields{
+						"originalParentHash": parentHashHex,
+						"responseParentHash": bidInfo.parentHash.String(),
+					}).Error("proposer and relay parent hashes are not the same")
 					return
 				}
+			*/
+
+			// @TODO: These seem like good ideas. Add them back later?
+			/*
+				isZeroValue := batonResponse.ExecPayloads.ToBHash.IsZero()
+				isEmptyListTxRoot := bidInfo.txRoot.String() == "0x7ffe241ea60187fdb0187bfa22de35d1f9bed7ab061d9401fd47e34a54fbede1"
+				if isZeroValue || isEmptyListTxRoot {
+					log.Warn("ignoring bid with 0 value")
+					return
+				}
+				log.Debug("bid received")
+			*/
+
+			// Remember which relays delivered which bids (multiple relays might deliver the top bid)
+
+			// filter out invalid chunks
+			relayMinBid := m.relayMinBid.BigInt()
+			if hasToB && !VerifyHeader(batonResponse.ExecPayloads.ToBHash, relayMinBid, log) {
+				batonResponse.ExecPayloads.ToBHash = nil
+				hasToB = false
+				log.Info("filtering out tob block")
 			}
 
-			// Verify response coherence with proposer's input data
-			if bidInfo.parentHash.String() != parentHashHex {
-				log.WithFields(logrus.Fields{
-					"originalParentHash": parentHashHex,
-					"responseParentHash": bidInfo.parentHash.String(),
-				}).Error("proposer and relay parent hashes are not the same")
-				return
-			}
-
-			isZeroValue := bidInfo.value.IsZero()
-			isEmptyListTxRoot := bidInfo.txRoot.String() == "0x7ffe241ea60187fdb0187bfa22de35d1f9bed7ab061d9401fd47e34a54fbede1"
-			if isZeroValue || isEmptyListTxRoot {
-				log.Warn("ignoring bid with 0 value")
-				return
-			}
-			log.Debug("bid received")
-
-			// Skip if value (fee) is lower than the minimum bid
-			if bidInfo.value.CmpBig(m.relayMinBid.BigInt()) == -1 {
-				log.Debug("ignoring bid below min-bid value")
-				return
+			for chainID, robChunk := range batonResponse.ExecPayloads.RoBHashes {
+				if !VerifyHeader(robChunk, relayMinBid, log) {
+					delete(batonResponse.ExecPayloads.RoBHashes, chainID)
+					log.Info("filtering out rob block for chain id: ", chainID)
+				}
 			}
 
 			mu.Lock()
 			defer mu.Unlock()
 
-			// Remember which relays delivered which bids (multiple relays might deliver the top bid)
-			relays[BlockHashHex(bidInfo.blockHash.String())] = append(relays[BlockHashHex(bidInfo.blockHash.String())], relay)
-
-			// Compare the bid with already known top bid (if any)
-			if !result.response.IsEmpty() {
-				valueDiff := bidInfo.value.Cmp(result.bidInfo.value)
-				if valueDiff == -1 { // current bid is less profitable than already known one
-					return
-				} else if valueDiff == 0 { // current bid is equally profitable as already known one. Use hash as tiebreaker
-					previousBidBlockHash := result.bidInfo.blockHash
-					if bidInfo.blockHash.String() >= previousBidBlockHash.String() {
-						return
-					}
-				}
+			if batonResponse.ExecPayloads.ToBHash != nil {
+				relays[BlockHashHex(batonResponse.ExecPayloads.ToBHash.BlockHash)] = append(relays[BlockHashHex(batonResponse.ExecPayloads.ToBHash.BlockHash)], relay)
 			}
 
-			// Use this relay's response as mev-boost response because it's most profitable
-			log.Debug("new best bid")
-			result.response = *responsePayload
-			result.bidInfo = bidInfo
-			result.t = time.Now()
+			if hasToB {
+				result.ToBHash = batonResponse.ExecPayloads.ToBHash.Header
+			}
+			for chainID, robChunk := range batonResponse.ExecPayloads.RoBHashes {
+				result.RoBHashes[chainID] = *robChunk.Header
+			}
+
+			responseIsGood.Store(true)
 		}(relay)
+
+		// only process one iteration
+		break
 	}
 
-	// Wait for all requests to complete...
+	// After waiting here, we should
 	wg.Wait()
 
-	if result.response.IsEmpty() {
-		log.Info("no bid received")
+	if result.IsEmpty() {
+		log.Info("no seq header response had no valid chunks")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	// Log result
-	valueEth := weiBigIntToEthBigFloat(result.bidInfo.value.ToBig())
-	result.relays = relays[BlockHashHex(result.bidInfo.blockHash.String())]
-	log.WithFields(logrus.Fields{
-		"blockHash":   result.bidInfo.blockHash.String(),
-		"blockNumber": result.bidInfo.blockNumber,
-		"txRoot":      result.bidInfo.txRoot.String(),
-		"value":       valueEth.Text('f', 18),
-		"relays":      strings.Join(RelayEntriesToStrings(result.relays), ", "),
-	}).Info("best bid")
-
+	// TODO: Verify bid key cache usage
 	// Remember the bid, for future logging in case of withholding
-	bidKey := bidRespKey{slot: _slot, blockHash: result.bidInfo.blockHash.String()}
+	bidKey := bidRespKey{slot: _slot, blockHash: batonResponse.BlockInfo.ChunkHash.String()}
 	m.bidsLock.Lock()
 	m.bids[bidKey] = result
 	m.bidsLock.Unlock()
 
 	// Return the bid
-	m.respondOK(w, &result.response)
+	m.respondOK(w, result)
 }
 
 // Mock implementation
@@ -648,7 +661,8 @@ func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Reques
 
 	// Note for mocking this is just a random header we send back to SEQ, and, while we expect them to sign
 	// it, we don't do any additional checking on the signature. Possibly might change in the future.
-	res.ToBHash = PopulateRandomHash32()
+	tobHash := PopulateRandomHash32()
+	res.ToBHash = &tobHash
 
 	// generate a random header hash  per RoB chunk
 	for k, v := range m.mockChunkRoB {
@@ -663,6 +677,7 @@ func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Reques
 	m.respondOK(w, res)
 }
 
+/*
 // note: receive payload from Baton first, then we verify the payload and send to SEQ
 func (m *AnchorService) processCapellaPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, payload *eth2ApiV1Capella.SignedBlindedBeaconBlock, body []byte) {
 	if payload.Message == nil || payload.Message.Body == nil || payload.Message.Body.ExecutionPayloadHeader == nil {
@@ -800,7 +815,9 @@ func (m *AnchorService) processCapellaPayload(w http.ResponseWriter, req *http.R
 
 	m.respondOK(w, result)
 }
+*/
 
+/*
 func (m *AnchorService) processDenebPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, blindedBlock *eth2ApiV1Deneb.SignedBlindedBeaconBlock) {
 	// Get the currentSlotUID for this slot
 	currentSlotUID := ""
@@ -941,6 +958,7 @@ func (m *AnchorService) processDenebPayload(w http.ResponseWriter, req *http.Req
 
 	m.respondOK(w, result)
 }
+*/
 
 // original implementation
 func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
@@ -955,20 +973,25 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	// Decode the body now
-	payload := new(eth2ApiV1Deneb.SignedBlindedBeaconBlock)
-	if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-		log.Debug("could not decode Deneb request payload, attempting to decode body into Capella payload")
-		payload := new(eth2ApiV1Capella.SignedBlindedBeaconBlock)
+	batonResponse := NewAnchorGetHeaderResponse()
+
+	// TODO: FIX ME
+	/*
+		// Decode the body now
+		payload := new(eth2ApiV1Deneb.SignedBlindedBeaconBlock)
 		if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-			log.WithError(err).WithField("body", string(body)).Error("could not decode request payload from the beacon-node (signed blinded beacon block)")
-			m.respondError(w, http.StatusBadRequest, err.Error())
+			log.Debug("could not decode Deneb request payload, attempting to decode body into Capella payload")
+			payload := new(eth2ApiV1Capella.SignedBlindedBeaconBlock)
+			if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
+				log.WithError(err).WithField("body", string(body)).Error("could not decode request payload from the beacon-node (signed blinded beacon block)")
+				m.respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			m.processCapellaPayload(w, req, log, payload, body)
 			return
 		}
-		m.processCapellaPayload(w, req, log, payload, body)
-		return
-	}
-	m.processDenebPayload(w, req, log, payload)
+		m.processDenebPayload(w, req, log, payload)
+	*/
 }
 
 // Mock custom handler. Note this is a true mock. It does no checking of the info
@@ -1059,17 +1082,20 @@ func (m *AnchorService) handleOPGetPayload2(w http.ResponseWriter, req *http.Req
 				return
 			}
 
-			// Getting the bid info will check if there are missing fields in the response
-			bidInfo := bidInfo{
-				blockHash:   phase0.Hash32(responsePayload.Payload.BlockHash),
-				parentHash:  phase0.Hash32(responsePayload.Payload.ParentHash),
-				blockNumber: uint64(responsePayload.Payload.BlockNumber),
-				value:       responsePayload.Value,
+			/*
+				// Getting the bid info will check if there are missing fields in the response
+				bidInfo := bidInfo{
+					blockHash:   phase0.Hash32(responsePayload.Payload.BlockHash),
+					parentHash:  phase0.Hash32(responsePayload.Payload.ParentHash),
+					blockNumber: uint64(responsePayload.Payload.BlockNumber),
+					value:       responsePayload.Value,
 
-				// ignored fields:
-				// txRoot
-				// pubkey
-			}
+					// ignored fields:
+					// txRoot
+					// pubkey
+				}
+
+			*/
 
 			if phase0.Hash32(responsePayload.Payload.BlockHash) == nilHash {
 				log.Warn("relay responded with empty block hash")

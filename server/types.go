@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
 
 	"github.com/AnomalyFi/hypersdk/codec"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	boostTypes "github.com/flashbots/go-boost-utils/types"
 )
 
 type ErrorCode int
@@ -129,6 +131,7 @@ type Uint256Quantity = uint256.Int
 
 type Data = hexutil.Bytes
 
+/*
 type ExecutionPayload struct {
 	ParentHash    common.Hash     `json:"parentHash"`
 	FeeRecipient  common.Address  `json:"feeRecipient"`
@@ -147,6 +150,7 @@ type ExecutionPayload struct {
 	// TransactionType || TransactionPayload or LegacyTransaction as defined in EIP-2718
 	Transactions []Data `json:"transactions"`
 }
+*/
 
 type OPBid struct {
 	Value   *uint256.Int      `json:"value"`
@@ -181,16 +185,20 @@ type SEQHeaderResponse struct {
 	// block builder address
 	PriorityFeeReceiverAddr codec.Address `json:"priorityfeereceiveraddr"`
 	// hash of the anchor chunks (tob + robs)
-	ChunkHash phase0.Hash32            `json:"chunkhash"`
-	ToBHash   phase0.Hash32            `json:"tobhash"`
-	RoBHashes map[string]phase0.Hash32 `json:"robhashes"`
+	ChunkHash common.Hash            `json:"chunkhash"`
+	ToBHash   *common.Hash           `json:"tobhash"`
+	RoBHashes map[string]common.Hash `json:"robhashes"`
 }
 
 func NewSEQHeaderResponse(slot uint64) SEQHeaderResponse {
 	return SEQHeaderResponse{
 		Slot:      slot,
-		RoBHashes: make(map[string]phase0.Hash32),
+		RoBHashes: make(map[string]common.Hash),
 	}
+}
+
+func (msg *SEQHeaderResponse) IsEmpty() bool {
+	return msg.ToBHash != nil && (msg.RoBHashes == nil || len(msg.RoBHashes) == 0)
 }
 
 // Request from SEQ for the payload
@@ -277,4 +285,66 @@ func (r *SEQHeaderRequest) ToJSON() ([]byte, error) {
 // SEQHeaderResponse Deserialization
 func (r *SEQHeaderResponse) FromJSON(data []byte) error {
 	return json.Unmarshal(data, r)
+}
+
+type ExecutionPayload struct {
+	// Array of transaction objects, each object is a byte list (DATA) representing
+	// TransactionType || TransactionPayload or LegacyTransaction as defined in EIP-2718
+	Transactions []hexutil.Bytes `json:"transactions"`
+}
+
+type AnchorHeader struct {
+	Header    *common.Hash `json:"header"`
+	BlockHash string       `json:"block_hash"`
+	Value     *big.Int     `json:"value"`
+}
+
+type AnchorGetHeaderResponse struct {
+	ExecPayloads ExecPayloadsInfo
+	BlockInfo    AnchorBlockInfo
+}
+
+func NewAnchorGetHeaderResponse() *AnchorGetHeaderResponse {
+	return &AnchorGetHeaderResponse{
+		ExecPayloads: *NewExecPayloadsInfo(),
+	}
+}
+
+func (msg *AnchorGetHeaderResponse) IsEmpty() bool {
+	return msg.ExecPayloads.ToBHash == nil && len(msg.ExecPayloads.RoBHashes) == 0
+}
+
+type AnchorBlockInfo struct {
+	// note: Message should be the anchor req
+	Slot uint64 `json:"slot"`
+	// nodeID of chunk producing validator.
+	Producer ids.NodeID `json:"producer"`
+	// hash of the anchor chunks (tob + robs)
+	ChunkHash common.Hash `json:"chunkhash"`
+}
+
+type ExecPayloadsInfo struct {
+	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
+	ToBHash   *AnchorHeader            `json:"tobhash"`
+	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
+}
+
+func NewExecPayloadsInfo() *ExecPayloadsInfo {
+	return &ExecPayloadsInfo{
+		RoBHashes: make(map[string]*AnchorHeader),
+	}
+}
+
+type AnchorGetPayloadRequest struct {
+	Slot uint64 `json:"slot"`
+	// TODO: Figure out how to verify signature(ex: actual vs expected)
+	Signature     boostTypes.Signature `json:"signature"`
+	ProposerIndex uint64               `json:"proposer_index"`
+	BlockHash     string               `json:"block_hash"`
+}
+
+type AnchorGetPayloadResponse struct {
+	Slot        uint64                      `json:"slot"`
+	ToBPayload  *ExecutionPayload           `json:"tobpayload"`
+	RoBPayloads map[string]ExecutionPayload `json:"robpayloads"`
 }
