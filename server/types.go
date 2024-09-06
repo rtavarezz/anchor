@@ -3,22 +3,24 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
-	"reflect"
-
 	"github.com/AnomalyFi/hypersdk/codec"
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ava-labs/avalanchego/ids"
+	"math/big"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	boostTypes "github.com/flashbots/go-boost-utils/types"
 )
 
 type ErrorCode int
+
+// TODO: Resolve what should be done with the below later.
+// This should be same as the signature type used in Baton.
+// This is included here because the Signature type was modified in the latest version of flashbots.
+type Signature [96]byte
 
 const (
 	UnknownPayload           ErrorCode = -32001 // Payload does not exist / is not available.
@@ -55,6 +57,7 @@ func (ie InputError) Is(target error) bool {
 
 type Bytes32 [32]byte
 
+/*
 func (b *Bytes32) UnmarshalJSON(text []byte) error {
 	return hexutil.UnmarshalFixedJSON(reflect.TypeOf(b), text, b[:])
 }
@@ -76,7 +79,8 @@ func (b Bytes32) String() string {
 func (b Bytes32) TerminalString() string {
 	return fmt.Sprintf("%x..%x", b[:3], b[29:])
 }
-
+*/
+/*
 type Bytes256 [256]byte
 
 func (b *Bytes256) UnmarshalJSON(text []byte) error {
@@ -100,9 +104,11 @@ func (b Bytes256) String() string {
 func (b Bytes256) TerminalString() string {
 	return fmt.Sprintf("%x..%x", b[:3], b[253:])
 }
+*/
 
 type Uint64Quantity = hexutil.Uint64
 
+/*
 type BytesMax32 []byte
 
 func (b *BytesMax32) UnmarshalJSON(text []byte) error {
@@ -126,6 +132,7 @@ func (b BytesMax32) MarshalText() ([]byte, error) {
 func (b BytesMax32) String() string {
 	return hexutil.Encode(b)
 }
+*/
 
 type Uint256Quantity = uint256.Int
 
@@ -293,6 +300,12 @@ type ExecutionPayload struct {
 	Transactions []hexutil.Bytes `json:"transactions"`
 }
 
+func NewExecutionPayload() ExecutionPayload {
+	return ExecutionPayload{
+		Transactions: make([]hexutil.Bytes, 0),
+	}
+}
+
 type AnchorHeader struct {
 	Header    *common.Hash `json:"header"`
 	BlockHash string       `json:"block_hash"`
@@ -338,13 +351,30 @@ func NewExecPayloadsInfo() *ExecPayloadsInfo {
 type AnchorGetPayloadRequest struct {
 	Slot uint64 `json:"slot"`
 	// TODO: Figure out how to verify signature(ex: actual vs expected)
-	Signature     boostTypes.Signature `json:"signature"`
-	ProposerIndex uint64               `json:"proposer_index"`
-	BlockHash     string               `json:"block_hash"`
+	Signature     Signature `json:"signature"`
+	ProposerIndex uint64    `json:"proposer_index"`
+	BlockHash     string    `json:"block_hash"`
 }
 
 type AnchorGetPayloadResponse struct {
 	Slot        uint64                      `json:"slot"`
 	ToBPayload  *ExecutionPayload           `json:"tobpayload"`
 	RoBPayloads map[string]ExecutionPayload `json:"robpayloads"`
+}
+
+func (msg *AnchorGetPayloadResponse) IsEmpty() bool {
+	return msg.ToBPayload == nil && len(msg.RoBPayloads) == 0
+}
+
+func NewAnchorGetPayloadResponse(slot uint64, needsToB bool) AnchorGetPayloadResponse {
+	var tob *ExecutionPayload
+	if needsToB {
+		payload := NewExecutionPayload()
+		tob = &payload
+	}
+	return AnchorGetPayloadResponse{
+		Slot:        slot,
+		ToBPayload:  tob,
+		RoBPayloads: make(map[string]ExecutionPayload),
+	}
 }

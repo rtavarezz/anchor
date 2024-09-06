@@ -8,8 +8,8 @@ require (
 	github.com/AnomalyFi/hypersdk v0.9.5
 	github.com/AnomalyFi/nodekit-seq v0.9.13
 	github.com/ava-labs/avalanchego v1.11.10
-	github.com/ethereum/go-ethereum v1.13.10
-	github.com/flashbots/go-boost-utils v1.8.0
+	github.com/ethereum/go-ethereum v1.13.14
+	github.com/flashbots/go-boost-utils v1.8.1
 	github.com/flashbots/go-utils v0.5.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
@@ -103,7 +103,6 @@ require (
 )
 
 require (
-	github.com/VictoriaMetrics/fastcache v1.12.1 // indirect
 	github.com/attestantio/go-builder-client v0.4.2
 	github.com/attestantio/go-eth2-client v0.19.10
 	github.com/btcsuite/btcd/btcec/v2 v2.3.2 // indirect
@@ -111,7 +110,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect
 	github.com/ferranbt/fastssz v0.1.3 // indirect
-	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect

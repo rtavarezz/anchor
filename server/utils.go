@@ -48,7 +48,15 @@ type UserAgent string
 type BlockHashHex string
 
 // SendHTTPRequest - prepare and send HTTP request, marshaling the payload if any, and decoding the response if dst is set
-func SendHTTPRequest(ctx context.Context, client http.Client, method, url string, userAgent UserAgent, headers map[string]string, payload, dst any) (code int, err error) {
+func SendHTTPRequest(
+	ctx context.Context,
+	client http.Client,
+	method,
+	url string,
+	userAgent UserAgent,
+	headers map[string]string,
+	payload,
+	dst any) (code int, err error) {
 	var req *http.Request
 
 	if payload == nil {
@@ -68,7 +76,7 @@ func SendHTTPRequest(ctx context.Context, client http.Client, method, url string
 	}
 
 	// Set user agent header
-	req.Header.Set("User-Agent", strings.TrimSpace(fmt.Sprintf("mev-boost/%s %s", config.Version, userAgent)))
+	req.Header.Set("User-Agent", strings.TrimSpace(fmt.Sprintf("anchor/%s %s", config.Version, userAgent)))
 
 	// Set other headers
 	for key, value := range headers {
@@ -109,7 +117,18 @@ func SendHTTPRequest(ctx context.Context, client http.Client, method, url string
 }
 
 // SendHTTPRequestWithRetries - prepare and send HTTP request, retrying the request if within the client timeout
-func SendHTTPRequestWithRetries(ctx context.Context, client http.Client, method, url string, userAgent UserAgent, headers map[string]string, payload, dst any, maxRetries int, log *logrus.Entry) (code int, err error) {
+func SendHTTPRequestWithRetries(
+	ctx context.Context,
+	client http.Client,
+	method,
+	url string,
+	userAgent UserAgent,
+	headers map[string]string,
+	payload,
+	dst any,
+	maxRetries int,
+	log *logrus.Entry,
+) (code int, err error) {
 	var requestCtx context.Context
 	var cancel context.CancelFunc
 	if client.Timeout > 0 {
@@ -169,10 +188,9 @@ func GetURI(url *url.URL, path string) string {
 
 // bidResp are entries in the bids cache
 type bidResp struct {
-	t        time.Time
-	response builderSpec.VersionedSignedBuilderBid
-	bidInfo  bidInfo
-	relays   []RelayEntry
+	t       time.Time
+	bidInfo SEQHeaderResponse
+	relays  []RelayEntry
 }
 
 // opBidResp are entries in the bids cache for OP
