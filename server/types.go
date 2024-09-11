@@ -7,6 +7,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ava-labs/avalanchego/ids"
+	"github.com/flashbots/go-boost-utils/bls"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -21,12 +22,6 @@ type ErrorCode int
 // This should be same as the signature type used in Baton.
 // This is included here because the Signature type was modified in the latest version of flashbots.
 type Signature [96]byte
-
-const (
-	UnknownPayload           ErrorCode = -32001 // Payload does not exist / is not available.
-	InvalidForkchoiceState   ErrorCode = -38002 // Forkchoice state is invalid / inconsistent.
-	InvalidPayloadAttributes ErrorCode = -38003 // Payload attributes are invalid / inconsistent.
-)
 
 const (
 	TestPrivateKeyValue = "77619a19a837f894fa5c90e58ee3e3d69e382936d323d987bbde923da92a5ac5"
@@ -55,109 +50,7 @@ func (ie InputError) Is(target error) bool {
 	return ok // we implement Unwrap, so we do not have to check the inner type now
 }
 
-type Bytes32 [32]byte
-
-/*
-func (b *Bytes32) UnmarshalJSON(text []byte) error {
-	return hexutil.UnmarshalFixedJSON(reflect.TypeOf(b), text, b[:])
-}
-
-func (b *Bytes32) UnmarshalText(text []byte) error {
-	return hexutil.UnmarshalFixedText("Bytes32", text, b[:])
-}
-
-func (b Bytes32) MarshalText() ([]byte, error) {
-	return hexutil.Bytes(b[:]).MarshalText()
-}
-
-func (b Bytes32) String() string {
-	return hexutil.Encode(b[:])
-}
-
-// TerminalString implements log.TerminalStringer, formatting a string for console
-// output during logging.
-func (b Bytes32) TerminalString() string {
-	return fmt.Sprintf("%x..%x", b[:3], b[29:])
-}
-*/
-/*
-type Bytes256 [256]byte
-
-func (b *Bytes256) UnmarshalJSON(text []byte) error {
-	return hexutil.UnmarshalFixedJSON(reflect.TypeOf(b), text, b[:])
-}
-
-func (b *Bytes256) UnmarshalText(text []byte) error {
-	return hexutil.UnmarshalFixedText("Bytes32", text, b[:])
-}
-
-func (b Bytes256) MarshalText() ([]byte, error) {
-	return hexutil.Bytes(b[:]).MarshalText()
-}
-
-func (b Bytes256) String() string {
-	return hexutil.Encode(b[:])
-}
-
-// TerminalString implements log.TerminalStringer, formatting a string for console
-// output during logging.
-func (b Bytes256) TerminalString() string {
-	return fmt.Sprintf("%x..%x", b[:3], b[253:])
-}
-*/
-
-type Uint64Quantity = hexutil.Uint64
-
-/*
-type BytesMax32 []byte
-
-func (b *BytesMax32) UnmarshalJSON(text []byte) error {
-	if len(text) > 64+2+2 { // account for delimiter "", and 0x prefix
-		return fmt.Errorf("input too long, expected at most 32 hex-encoded, 0x-prefixed, bytes: %x", text)
-	}
-	return (*hexutil.Bytes)(b).UnmarshalJSON(text)
-}
-
-func (b *BytesMax32) UnmarshalText(text []byte) error {
-	if len(text) > 64+2 { // account for 0x prefix
-		return fmt.Errorf("input too long, expected at most 32 hex-encoded, 0x-prefixed, bytes: %x", text)
-	}
-	return (*hexutil.Bytes)(b).UnmarshalText(text)
-}
-
-func (b BytesMax32) MarshalText() ([]byte, error) {
-	return (hexutil.Bytes)(b).MarshalText()
-}
-
-func (b BytesMax32) String() string {
-	return hexutil.Encode(b)
-}
-*/
-
-type Uint256Quantity = uint256.Int
-
 type Data = hexutil.Bytes
-
-/*
-type ExecutionPayload struct {
-	ParentHash    common.Hash     `json:"parentHash"`
-	FeeRecipient  common.Address  `json:"feeRecipient"`
-	StateRoot     Bytes32         `json:"stateRoot"`
-	ReceiptsRoot  Bytes32         `json:"receiptsRoot"`
-	LogsBloom     Bytes256        `json:"logsBloom"`
-	PrevRandao    Bytes32         `json:"prevRandao"`
-	BlockNumber   Uint64Quantity  `json:"blockNumber"`
-	GasLimit      Uint64Quantity  `json:"gasLimit"`
-	GasUsed       Uint64Quantity  `json:"gasUsed"`
-	Timestamp     Uint64Quantity  `json:"timestamp"`
-	ExtraData     BytesMax32      `json:"extraData"`
-	BaseFeePerGas Uint256Quantity `json:"baseFeePerGas"`
-	BlockHash     common.Hash     `json:"blockHash"`
-	// Array of transaction objects, each object is a byte list (DATA) representing
-	// TransactionType || TransactionPayload or LegacyTransaction as defined in EIP-2718
-	Transactions []Data `json:"transactions"`
-}
-*/
 
 type OPBid struct {
 	Value   *uint256.Int      `json:"value"`
@@ -205,16 +98,17 @@ func NewSEQHeaderResponse(slot uint64) SEQHeaderResponse {
 }
 
 func (msg *SEQHeaderResponse) IsEmpty() bool {
-	return msg.ToBHash != nil && (msg.RoBHashes == nil || len(msg.RoBHashes) == 0)
+	return msg.ToBHash == nil && (msg.RoBHashes == nil || len(msg.RoBHashes) == 0)
 }
 
-// Request from SEQ for the payload
+// @TODO: This is deprecated. Remove later when mock methods no longer needed.
 type SEQPayloadRequest struct {
 	Slot                   uint64                                    `json:"slot"`
 	ToBBlindedBeaconBlock  AnchorSignedBlindedBeaconBlock            `json:"tobblindedbeaconblock"`
 	RoBBlindedBeaconBlocks map[string]AnchorSignedBlindedBeaconBlock `json:"robblindedbeaconblocks"`
 }
 
+// @TODO: This is deprecated. Remove later when mock methods no longer needed.
 func NewSEQPayloadRequest(slot uint64) SEQPayloadRequest {
 	return SEQPayloadRequest{
 		Slot:                   slot,
@@ -236,11 +130,13 @@ func NewSEQPayloadResponse(slot uint64) SEQPayloadResponse {
 	}
 }
 
+// @TODO: This is deprecated. Remove later when mock methods no longer needed.
 type AnchorSignedBlindedBeaconBlock struct {
 	Message   *AnchorBlindedBeaconBlock
 	Signature phase0.BLSSignature `ssz-size:"96"`
 }
 
+// @TODO: This is deprecated. Remove later when mock methods no longer needed.
 type AnchorBlindedBeaconBlock struct {
 	Slot          phase0.Slot
 	ProposerIndex phase0.ValidatorIndex
@@ -249,10 +145,12 @@ type AnchorBlindedBeaconBlock struct {
 	Body          *AnchorBlindedBeaconBlockBody
 }
 
+// @TODO: This is deprecated. Remove later when mock methods no longer needed.
 type AnchorBlindedBeaconBlockBody struct {
 	ExecutionPayloadHeader *AnchorExecutionPayloadHeader
 }
 
+// @TODO: This is deprecated. Remove later when mock methods no longer needed.
 // receiving payload from SEQ
 type AnchorExecutionPayloadHeader struct {
 	FeeRecipient     bellatrix.ExecutionAddress `ssz-size:"20"`
@@ -333,7 +231,8 @@ type AnchorBlockInfo struct {
 	// nodeID of chunk producing validator.
 	Producer ids.NodeID `json:"producer"`
 	// hash of the anchor chunks (tob + robs)
-	ChunkHash common.Hash `json:"chunkhash"`
+	ChunkHash      common.Hash   `json:"chunkhash"`
+	ProposerPubkey bls.PublicKey `json:"proposer_pubkey"`
 }
 
 type ExecPayloadsInfo struct {
@@ -364,6 +263,21 @@ type AnchorGetPayloadResponse struct {
 
 func (msg *AnchorGetPayloadResponse) IsEmpty() bool {
 	return msg.ToBPayload == nil && len(msg.RoBPayloads) == 0
+}
+
+func (msg *AnchorGetPayloadResponse) NumToBTxs() int {
+	if msg.ToBPayload == nil {
+		return 0
+	}
+	return len(msg.ToBPayload.Transactions)
+}
+
+func (msg *AnchorGetPayloadResponse) NumRoBTxs() int {
+	var numTxs int
+	for _, txs := range msg.RoBPayloads {
+		numTxs = numTxs + len(txs.Transactions)
+	}
+	return numTxs
 }
 
 func NewAnchorGetPayloadResponse(slot uint64, needsToB bool) AnchorGetPayloadResponse {

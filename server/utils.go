@@ -193,14 +193,6 @@ type bidResp struct {
 	relays  []RelayEntry
 }
 
-// opBidResp are entries in the bids cache for OP
-type opBidResp struct {
-	t        time.Time
-	response OPBid
-	bidInfo  bidInfo
-	relays   []RelayEntry
-}
-
 // bidRespKey is used as key for the bids cache
 type bidRespKey struct {
 	slot      uint64
@@ -377,20 +369,28 @@ func VerifyHeader(header *AnchorHeader, relayMinBid *big.Int, log *logrus.Entry)
 	}
 
 	if header.BlockHash == "" {
-		log.Info("header [%s] due to empty block hash", header.Header.String())
+		log.Infof("header [%s] due to empty block hash", header.Header.String())
 		return false
 	}
 
 	if header.Value == nil || header.Value.Uint64() == 0 {
-		log.Info("header [%s] due to zero or missing value", header.Header.String())
+		log.Infof("header [%s] due to zero or missing value", header.Header.String())
 		return false
 	}
 
 	// Skip if value (fee) is lower than the minimum bid
 	if header.Value.Cmp(relayMinBid) == -1 {
-		log.Info("header [%s] ignoring bid below min-bid value", header.Header.String())
+		log.Infof("header [%s] ignoring bid below min-bid value", header.Header.String())
 		return false
 	}
 
 	return true
+}
+
+func SignMsg(msg []byte, secretKey *bls.SecretKey) *bls.Signature {
+	return bls.Sign(secretKey, msg)
+}
+
+func VerifySignature(msg []byte, publicKey *bls.PublicKey, signature *bls.Signature) (bool, error) {
+	return bls.VerifySignature(signature, publicKey, msg)
 }

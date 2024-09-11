@@ -45,7 +45,7 @@ func TestSendHTTPRequestUserAgent(t *testing.T) {
 
 	// Test with custom UA
 	customUA := "test-user-agent"
-	expectedUA := fmt.Sprintf("mev-boost/%s %s", config.Version, customUA)
+	expectedUA := fmt.Sprintf("anchor/%s %s", config.Version, customUA)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, expectedUA, r.Header.Get("User-Agent"))
 		done <- true
@@ -57,7 +57,7 @@ func TestSendHTTPRequestUserAgent(t *testing.T) {
 	<-done
 
 	// Test without custom UA
-	expectedUA = fmt.Sprintf("mev-boost/%s", config.Version)
+	expectedUA = fmt.Sprintf("anchor/%s", config.Version)
 	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, expectedUA, r.Header.Get("User-Agent"))
 		done <- true

@@ -427,6 +427,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 	batonResponse := new(AnchorGetHeaderResponse)
 	relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
 	var responseIsGood atomic.Bool
+	var chunksNotGood atomic.Bool
 
 	// Forward the request to Baton. For now, there will be a single instance of Baton.
 	var mu sync.Mutex
@@ -441,7 +442,6 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			url := relay.GetURI(path)
 			log := log.WithField("url", url)
 
-			//batonResponse := new(builderSpec.VersionedSignedBuilderBid)
 			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, batonResponse)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
@@ -482,17 +482,15 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 				"rob_values": robValues,
 			})
 
-			/*
-				valueEth := weiBigIntToEthBigFloat(bidInfo.value.ToBig())
-			*/
+			// TODO: Add proposer pub key to Baton responses
+			relayPubKey := relay.PublicKey
+			reqPubKey := batonResponse.BlockInfo.ProposerPubkey.Bytes()
+			if relayPubKey != reqPubKey {
+				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), batonResponse.BlockInfo.ProposerPubkey.String())
+				return
+			}
 
-			// TODO: This public key check seems like a good idea.
 			/*
-				if relay.PublicKey.String() != bidInfo.pubkey.String() {
-					log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), bidInfo.pubkey.String())
-					return
-				}
-
 				// Verify the relay signature in the relay response
 				if !config.SkipRelaySignatureCheck {
 					ok, err := checkRelaySignature(batonResponse, m.builderSigningDomain, relay.PublicKey)
@@ -507,43 +505,20 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 				}
 			*/
 
-			// @TODO: This parent hash check seems like a good idea. Add them back later?
-			/*
-				// Verify response coherence with proposer's input data
-				if bidInfo.parentHash.String() != parentHashHex {
-					log.WithFields(logrus.Fields{
-						"originalParentHash": parentHashHex,
-						"responseParentHash": bidInfo.parentHash.String(),
-					}).Error("proposer and relay parent hashes are not the same")
-					return
-				}
-			*/
-
-			// @TODO: These seem like good ideas. Add them back later?
-			/*
-				isZeroValue := batonResponse.ExecPayloads.ToBHash.IsZero()
-				isEmptyListTxRoot := bidInfo.txRoot.String() == "0x7ffe241ea60187fdb0187bfa22de35d1f9bed7ab061d9401fd47e34a54fbede1"
-				if isZeroValue || isEmptyListTxRoot {
-					log.Warn("ignoring bid with 0 value")
-					return
-				}
-				log.Debug("bid received")
-			*/
-
-			// Remember which relays delivered which bids (multiple relays might deliver the top bid)
-
 			// filter out invalid chunks
 			relayMinBid := m.relayMinBid.BigInt()
 			if hasToB && !VerifyHeader(batonResponse.ExecPayloads.ToBHash, relayMinBid, log) {
 				batonResponse.ExecPayloads.ToBHash = nil
 				hasToB = false
 				log.Info("filtering out tob block")
+				chunksNotGood.Store(true)
 			}
 
 			for chainID, robChunk := range batonResponse.ExecPayloads.RoBHashes {
 				if !VerifyHeader(robChunk, relayMinBid, log) {
 					delete(batonResponse.ExecPayloads.RoBHashes, chainID)
 					log.Info("filtering out rob block for chain id: ", chainID)
+					chunksNotGood.Store(true)
 				}
 			}
 
@@ -573,7 +548,13 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 
 	if result.IsEmpty() {
 		log.Info("no seq header response had no valid chunks")
-		w.WriteHeader(http.StatusNoContent)
+
+		if chunksNotGood.Load() {
+			// In this case, chunks were filtered out because they did not pass verification, and response is now empty.
+			w.WriteHeader(http.StatusBadRequest)
+		} else {
+			w.WriteHeader(http.StatusNoContent)
+		}
 		return
 	}
 
@@ -679,289 +660,6 @@ func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Reques
 	m.respondOK(w, res)
 }
 
-/*
-// note: receive payload from Baton first, then we verify the payload and send to SEQ
-func (m *AnchorService) processCapellaPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, payload *eth2ApiV1Capella.SignedBlindedBeaconBlock, body []byte) {
-	if payload.Message == nil || payload.Message.Body == nil || payload.Message.Body.ExecutionPayloadHeader == nil {
-		log.WithField("body", string(body)).Error("missing parts of the request payload from the beacon-node")
-		m.respondError(w, http.StatusBadRequest, "missing parts of the payload")
-		return
-	}
-
-	// Get the slotUID for this slot
-	slotUID := ""
-	m.slotUIDLock.Lock()
-	if m.slotUID.slot == uint64(payload.Message.Slot) {
-		slotUID = m.slotUID.uid.String()
-	} else {
-		log.Warnf("latest slotUID is for slot %d rather than payload slot %d", m.slotUID.slot, payload.Message.Slot)
-	}
-	m.slotUIDLock.Unlock()
-
-	// Prepare logger
-	ua := UserAgent(req.Header.Get("User-Agent"))
-	log = log.WithFields(logrus.Fields{
-		"ua":         ua,
-		"slot":       payload.Message.Slot,
-		"blockHash":  payload.Message.Body.ExecutionPayloadHeader.BlockHash.String(),
-		"parentHash": payload.Message.Body.ExecutionPayloadHeader.ParentHash.String(),
-		"slotUID":    slotUID,
-	})
-
-	// Log how late into the slot the request starts
-	slotStartTimestamp := m.genesisTime + uint64(payload.Message.Slot)*config.SlotTimeSec
-	msIntoSlot := uint64(time.Now().UTC().UnixMilli()) - slotStartTimestamp*1000
-	log.WithFields(logrus.Fields{
-		"genesisTime": m.genesisTime,
-		"slotTimeSec": config.SlotTimeSec,
-		"msIntoSlot":  msIntoSlot,
-	}).Infof("submitBlindedBlock request start - %d milliseconds into slot %d", msIntoSlot, payload.Message.Slot)
-
-	// Get the bid!
-	bidKey := bidRespKey{slot: uint64(payload.Message.Slot), blockHash: payload.Message.Body.ExecutionPayloadHeader.BlockHash.String()}
-	m.bidsLock.Lock()
-	originalBid := m.bids[bidKey]
-	m.bidsLock.Unlock()
-	if originalBid.response.IsEmpty() {
-		log.Error("no bid for this getPayload payload found. was getHeader called before?")
-	} else if len(originalBid.relays) == 0 {
-		log.Warn("bid found but no associated relays")
-	}
-
-	// send bid and signed block to relay monitor with eth2ApiV1Capella payload
-	// go m.sendAuctionTranscriptToRelayMonitors(&AuctionTranscript{Bid: originalBid.response.Data, Acceptance: payload})
-
-	// Add request headers
-	headers := map[string]string{HeaderKeySlotUID: slotUID}
-
-	// Prepare for requests
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	result := new(builderApi.VersionedSubmitBlindedBlockResponse)
-
-	// Prepare the request context, which will be cancelled after the first successful response from a relay
-	requestCtx, requestCtxCancel := context.WithCancel(context.Background())
-	defer requestCtxCancel()
-
-	for _, relay := range m.relays {
-		wg.Add(1)
-		go func(relay RelayEntry) {
-			defer wg.Done()
-			url := relay.GetURI(pathGetPayload)
-			log := log.WithField("url", url)
-			log.Debug("calling getPayload")
-
-			responsePayload := new(builderApi.VersionedSubmitBlindedBlockResponse)
-			_, err := SendHTTPRequestWithRetries(requestCtx, m.httpClientGetPayload, http.MethodPost, url, ua, headers, payload, responsePayload, m.requestMaxRetries, log)
-			if err != nil {
-				if errors.Is(requestCtx.Err(), context.Canceled) {
-					log.Info("request was cancelled") // this is expected, if payload has already been received by another relay
-				} else {
-					log.WithError(err).Error("error making request to relay")
-				}
-				return
-			}
-
-			if getPayloadResponseIsEmpty(responsePayload) {
-				log.Error("response with empty data!")
-				return
-			}
-
-			// Ensure the response blockhash matches the request
-			if payload.Message.Body.ExecutionPayloadHeader.BlockHash != responsePayload.Capella.BlockHash {
-				log.WithFields(logrus.Fields{
-					"responseBlockHash": responsePayload.Capella.BlockHash.String(),
-				}).Error("requestBlockHash does not equal responseBlockHash")
-				return
-			}
-
-			// Ensure the response blockhash matches the response block
-			calculatedBlockHash, err := boostUtils.ComputeBlockHash(&builderApi.VersionedExecutionPayload{
-				Version: responsePayload.Version,
-				Capella: responsePayload.Capella,
-			}, nil)
-			if err != nil {
-				log.WithError(err).Error("could not calculate block hash")
-			} else if responsePayload.Capella.BlockHash != calculatedBlockHash {
-				log.WithFields(logrus.Fields{
-					"calculatedBlockHash": calculatedBlockHash.String(),
-					"responseBlockHash":   responsePayload.Capella.BlockHash.String(),
-				}).Error("responseBlockHash does not equal hash calculated from response block")
-			}
-
-			// Lock before accessing the shared payload
-			mu.Lock()
-			defer mu.Unlock()
-
-			if requestCtx.Err() != nil { // request has been cancelled (or deadline exceeded)
-				return
-			}
-
-			// Received successful response. Now cancel other requests and return immediately
-			requestCtxCancel()
-			*result = *responsePayload
-			log.Info("received payload from relay")
-		}(relay)
-	}
-
-	// Wait for all requests to complete...
-	wg.Wait()
-
-	// If no payload has been received from relay, log loudly about withholding!
-	if result.Capella == nil || result.Capella.BlockHash == nilHash {
-		originRelays := RelayEntriesToStrings(originalBid.relays)
-		log.WithField("relaysWithBid", strings.Join(originRelays, ", ")).Error("no payload received from relay!")
-		m.respondError(w, http.StatusBadGateway, errNoSuccessfulRelayResponse.Error())
-		return
-	}
-
-	m.respondOK(w, result)
-}
-*/
-
-/*
-func (m *AnchorService) processDenebPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, blindedBlock *eth2ApiV1Deneb.SignedBlindedBeaconBlock) {
-	// Get the currentSlotUID for this slot
-	currentSlotUID := ""
-	m.slotUIDLock.Lock()
-	if m.slotUID.slot == uint64(blindedBlock.Message.Slot) {
-		currentSlotUID = m.slotUID.uid.String()
-	} else {
-		log.Warnf("latest slotUID is for slot %d rather than payload slot %d", m.slotUID.slot, blindedBlock.Message.Slot)
-	}
-	m.slotUIDLock.Unlock()
-	//TODO new stuff here?
-
-	// Prepare logger
-	ua := UserAgent(req.Header.Get("User-Agent"))
-	log = log.WithFields(logrus.Fields{
-		"ua":         ua,
-		"slot":       blindedBlock.Message.Slot,
-		"blockHash":  blindedBlock.Message.Body.ExecutionPayloadHeader.BlockHash.String(),
-		"parentHash": blindedBlock.Message.Body.ExecutionPayloadHeader.ParentHash.String(),
-		"slotUID":    currentSlotUID,
-	})
-
-	// Log how late into the slot the request starts
-	slotStartTimestamp := m.genesisTime + uint64(blindedBlock.Message.Slot)*config.SlotTimeSec
-	msIntoSlot := uint64(time.Now().UTC().UnixMilli()) - slotStartTimestamp*1000
-	log.WithFields(logrus.Fields{
-		"genesisTime": m.genesisTime,
-		"slotTimeSec": config.SlotTimeSec,
-		"msIntoSlot":  msIntoSlot,
-	}).Infof("submitBlindedBlock request start - %d milliseconds into slot %d", msIntoSlot, blindedBlock.Message.Slot)
-
-	// Get the bid!
-	bidKey := bidRespKey{slot: uint64(blindedBlock.Message.Slot), blockHash: blindedBlock.Message.Body.ExecutionPayloadHeader.BlockHash.String()}
-	m.bidsLock.Lock()
-	originalBid := m.bids[bidKey]
-	m.bidsLock.Unlock()
-	if originalBid.response.IsEmpty() {
-		log.Error("no bid for this getPayload payload found, was getHeader called before?")
-	} else if len(originalBid.relays) == 0 {
-		log.Warn("bid found but no associated relays")
-	}
-
-	// Add request headers
-	headers := map[string]string{HeaderKeySlotUID: currentSlotUID}
-
-	// Prepare for requests
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	result := new(builderApi.VersionedSubmitBlindedBlockResponse)
-
-	// Prepare the request context, which will be cancelled after the first successful response from a relay
-	requestCtx, requestCtxCancel := context.WithCancel(context.Background())
-	defer requestCtxCancel()
-
-	for _, relay := range m.relays {
-		wg.Add(1)
-		go func(relay RelayEntry) {
-			defer wg.Done()
-			url := relay.GetURI(pathGetPayload)
-			log := log.WithField("url", url)
-			log.Debug("calling getPayload")
-
-			responsePayload := new(builderApi.VersionedSubmitBlindedBlockResponse)
-			_, err := SendHTTPRequestWithRetries(requestCtx, m.httpClientGetPayload, http.MethodPost, url, ua, headers, blindedBlock, responsePayload, m.requestMaxRetries, log)
-			if err != nil {
-				if errors.Is(requestCtx.Err(), context.Canceled) {
-					log.Info("request was cancelled") // this is expected, if payload has already been received by another relay
-				} else {
-					log.WithError(err).Error("error making request to relay")
-				}
-				return
-			}
-
-			if getPayloadResponseIsEmpty(responsePayload) {
-				log.Error("response with empty data!")
-				return
-			}
-
-			payload := responsePayload.Deneb.ExecutionPayload
-			blobs := responsePayload.Deneb.BlobsBundle
-
-			// Ensure the response blockhash matches the request
-			if blindedBlock.Message.Body.ExecutionPayloadHeader.BlockHash != payload.BlockHash {
-				log.WithFields(logrus.Fields{
-					"responseBlockHash": payload.BlockHash.String(),
-				}).Error("requestBlockHash does not equal responseBlockHash")
-				return
-			}
-
-			commitments := blindedBlock.Message.Body.BlobKZGCommitments
-			// Ensure that blobs are valid and matches the request
-			if len(commitments) != len(blobs.Blobs) || len(commitments) != len(blobs.Commitments) || len(commitments) != len(blobs.Proofs) {
-				log.WithFields(logrus.Fields{
-					"requestBlobCommitments":  len(commitments),
-					"responseBlobs":           len(blobs.Blobs),
-					"responseBlobCommitments": len(blobs.Commitments),
-					"responseBlobProofs":      len(blobs.Proofs),
-				}).Error("block KZG commitment length does not equal responseBlobs length")
-				return
-			}
-
-			for i, commitment := range commitments {
-				if commitment != blobs.Commitments[i] {
-					log.WithFields(logrus.Fields{
-						"requestBlobCommitment":  commitment.String(),
-						"responseBlobCommitment": blobs.Commitments[i].String(),
-						"index":                  i,
-					}).Error("requestBlobCommitment does not equal responseBlobCommitment")
-					return
-				}
-			}
-
-			// Lock before accessing the shared payload
-			mu.Lock()
-			defer mu.Unlock()
-
-			if requestCtx.Err() != nil { // request has been cancelled (or deadline exceeded)
-				return
-			}
-
-			// Received successful response. Now cancel other requests and return immediately
-			requestCtxCancel()
-			*result = *responsePayload
-			log.Info("received payload from relay")
-		}(relay)
-	}
-
-	// Wait for all requests to complete...
-	wg.Wait()
-
-	// If no payload has been received from relay, log loudly about withholding!
-	if getPayloadResponseIsEmpty(result) {
-		originRelays := RelayEntriesToStrings(originalBid.relays)
-		log.WithField("relaysWithBid", strings.Join(originRelays, ", ")).Error("no payload received from relay!")
-		m.respondError(w, http.StatusBadGateway, errNoSuccessfulRelayResponse.Error())
-		return
-	}
-
-	m.respondOK(w, result)
-}
-*/
-
 // original implementation
 func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
@@ -976,9 +674,9 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	}
 
 	payloadReq := AnchorGetPayloadRequest{}
-	err = json.Unmarshal(body, payloadReq)
+	err = json.Unmarshal(body, &payloadReq)
 	if err != nil {
-		log.WithError(err).Error("could not read body of request from the beacon node")
+		log.WithError(err).Error("could not read body of request in getPayload")
 		m.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1059,7 +757,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 				ua,
 				headers,
 				payloadReq,
-				localResult,
+				&localResult,
 				m.requestMaxRetries,
 				log)
 			if err != nil {
@@ -1071,7 +769,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 				return
 			}
 
-			if result.IsEmpty() {
+			if localResult.IsEmpty() {
 				log.Error("response with empty data!")
 				return
 			}
@@ -1117,24 +815,6 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	}
 
 	m.respondOK(w, result)
-
-	// TODO: FIX ME
-	/*
-		// Decode the body now
-		payload := new(eth2ApiV1Deneb.SignedBlindedBeaconBlock)
-		if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-			log.Debug("could not decode Deneb request payload, attempting to decode body into Capella payload")
-			payload := new(eth2ApiV1Capella.SignedBlindedBeaconBlock)
-			if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-				log.WithError(err).WithField("body", string(body)).Error("could not decode request payload from the beacon-node (signed blinded beacon block)")
-				m.respondError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			m.processCapellaPayload(w, req, log, payload, body)
-			return
-		}
-		m.processDenebPayload(w, req, log, payload)
-	*/
 }
 
 // Mock custom handler. Note this is a true mock. It does no checking of the info
