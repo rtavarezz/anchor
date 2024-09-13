@@ -259,6 +259,25 @@ func getPayloadPath2() string {
 	return fmt.Sprintf("/eth/v1/builder/blinded_blocks2")
 }
 
+func TestVerifyHeaderSignatures(t *testing.T) {
+	secretKey, err := bls.GenerateRandomSecretKey()
+	require.NoError(t, err)
+
+	// Sign the exec payloads
+	headerMsg := MakeRandomAnchorGetHeaderResponse(1)
+	signature, err := SignExecPayloads(&headerMsg.ExecPayloads, secretKey)
+	require.NoError(t, err)
+	headerMsg.ExecPayloadsSig = *signature
+
+	// Verify the signature matches
+	pubKey, err := bls.PublicKeyFromSecretKey(secretKey)
+	require.NoError(t, err)
+
+	headerIsVerified, err := VerifyHeaderSignatures(headerMsg, *pubKey)
+	require.NoError(t, err)
+	require.True(t, headerIsVerified)
+}
+
 func TestGetHeader(t *testing.T) {
 	hash := _HexToHash("0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7")
 	pubkey := _HexToPubkey(
@@ -758,6 +777,24 @@ func TestGetPayload(t *testing.T) {
 		require.Equal(t, DefaultTestPayloadNumRoBTxs, resp.NumRoBTxs())
 		//require.Equal(t, payload.Message.Body.ExecutionPayloadHeader.BlockHash, resp.Capella.BlockHash)
 	})
+
+	/*
+		t.Run("Empty response from relay", func(t *testing.T) {
+			backend := newTestBackend(t, 1, time.Second*30)
+
+			resp := MakeRandomAnchorGetHeaderResponse(1)
+			rr := backend.request(t, http.MethodPost, path, payloadReq)
+			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+			require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
+
+			resp := new(AnchorGetPayloadResponse)
+			err := json.Unmarshal(rr.Body.Bytes(), resp)
+			require.NoError(t, err)
+			require.Equal(t, DefaultTestPayloadNumToBTxs, resp.NumToBTxs())
+			require.Equal(t, DefaultTestPayloadNumRoBTxs, resp.NumRoBTxs())
+			//require.Equal(t, payload.Message.Body.ExecutionPayloadHeader.BlockHash, resp.Capella.BlockHash)
+		})
+	*/
 
 	/*
 		t.Run("Bad response from relays", func(t *testing.T) {

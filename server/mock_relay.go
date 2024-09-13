@@ -366,7 +366,7 @@ func MakeRandomAnchorGetHeaderResponse(slot uint64) *AnchorGetHeaderResponse {
 	robHashes[TestChainID1] = &robAnchorHeader1
 	robHashes[TestChainID2] = &robAnchorHeader2
 
-	execPayloads := ExecPayloadsInfo{
+	execPayloads := ExecHeadersInfo{
 		ToBHash:   &tobAnchorHeader,
 		RoBHashes: robHashes,
 	}
@@ -487,8 +487,8 @@ func MakeRandomAnchorGetPayloadResponse(
 		robPayloads[robChainID] = *robPayload
 	}
 
-	resp.ToBPayload = tobPayload
-	resp.RoBPayloads = robPayloads
+	resp.ExecPayloads.ToBPayload = tobPayload
+	resp.ExecPayloads.RoBPayloads = robPayloads
 
 	return &resp, nil
 }

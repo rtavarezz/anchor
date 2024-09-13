@@ -221,42 +221,6 @@ func weiBigIntToEthBigFloat(wei *big.Int) (ethValue *big.Float) {
 	return
 }
 
-func parseBidInfo(bid *builderSpec.VersionedSignedBuilderBid) (bidInfo, error) {
-	blockHash, err := bid.BlockHash()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	parentHash, err := bid.ParentHash()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	pubkey, err := bid.Builder()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	blockNumber, err := bid.BlockNumber()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	txRoot, err := bid.TransactionsRoot()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	value, err := bid.Value()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	bidInfo := bidInfo{
-		blockHash:   blockHash,
-		parentHash:  parentHash,
-		pubkey:      pubkey,
-		blockNumber: blockNumber,
-		txRoot:      txRoot,
-		value:       value,
-	}
-	return bidInfo, nil
-}
-
 func checkRelaySignature(bid *builderSpec.VersionedSignedBuilderBid, domain phase0.Domain, pubKey phase0.BLSPubKey) (bool, error) {
 	root, err := bid.MessageHashTreeRoot()
 	if err != nil {
@@ -391,6 +355,8 @@ func SignMsg(msg []byte, secretKey *bls.SecretKey) *bls.Signature {
 	return bls.Sign(secretKey, msg)
 }
 
+/*
 func VerifySignature(msg []byte, publicKey *bls.PublicKey, signature *bls.Signature) (bool, error) {
 	return bls.VerifySignature(signature, publicKey, msg)
 }
+*/

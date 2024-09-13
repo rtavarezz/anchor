@@ -491,6 +491,20 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			}
 
 			/*
+			   if !config.SkipRelaySignatureCheck {
+			     ok, err := checkRelaySignature(batonResponse, m.builderSigningDomain, relay.PublicKey)
+			     if err != nil {
+			       log.WithError(err).Error("error verifying relay signature")
+			       return
+			     }
+			     if !ok {
+			       log.Error("failed to verify relay signature")
+			       return
+			     }
+			   }
+			*/
+
+			/*
 				// Verify the relay signature in the relay response
 				if !config.SkipRelaySignatureCheck {
 					ok, err := checkRelaySignature(batonResponse, m.builderSigningDomain, relay.PublicKey)

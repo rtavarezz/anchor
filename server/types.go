@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/AnomalyFi/hypersdk/codec"
@@ -211,8 +212,9 @@ type AnchorHeader struct {
 }
 
 type AnchorGetHeaderResponse struct {
-	ExecPayloads ExecPayloadsInfo
-	BlockInfo    AnchorBlockInfo
+	ExecPayloads    ExecHeadersInfo `json:"exec_payloads"`
+	BlockInfo       AnchorBlockInfo `json:"block_info"`
+	ExecPayloadsSig bls.Signature   `json:"exec_payloads_sig"` // signature used for signing the bid
 }
 
 func NewAnchorGetHeaderResponse() *AnchorGetHeaderResponse {
@@ -225,6 +227,18 @@ func (msg *AnchorGetHeaderResponse) IsEmpty() bool {
 	return msg.ExecPayloads.ToBHash == nil && len(msg.ExecPayloads.RoBHashes) == 0
 }
 
+type ExecHeadersInfo struct {
+	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
+	ToBHash   *AnchorHeader            `json:"tobhash"`
+	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
+}
+
+func NewExecPayloadsInfo() *ExecHeadersInfo {
+	return &ExecHeadersInfo{
+		RoBHashes: make(map[string]*AnchorHeader),
+	}
+}
+
 type AnchorBlockInfo struct {
 	// note: Message should be the anchor req
 	Slot uint64 `json:"slot"`
@@ -235,46 +249,38 @@ type AnchorBlockInfo struct {
 	ProposerPubkey bls.PublicKey `json:"proposer_pubkey"`
 }
 
-type ExecPayloadsInfo struct {
-	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
-	ToBHash   *AnchorHeader            `json:"tobhash"`
-	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
-}
-
-func NewExecPayloadsInfo() *ExecPayloadsInfo {
-	return &ExecPayloadsInfo{
-		RoBHashes: make(map[string]*AnchorHeader),
-	}
-}
-
 type AnchorGetPayloadRequest struct {
-	Slot uint64 `json:"slot"`
-	// TODO: Figure out how to verify signature(ex: actual vs expected)
-	Signature     Signature `json:"signature"`
-	ProposerIndex uint64    `json:"proposer_index"`
-	BlockHash     string    `json:"block_hash"`
+	Slot          uint64        `json:"slot"`
+	ProposerIndex uint64        `json:"proposer_index"`
+	BlockHash     string        `json:"block_hash"`
+	SignedHeaders bls.Signature `json:"signed_headers"`
 }
 
-type AnchorGetPayloadResponse struct {
-	Slot        uint64                      `json:"slot"`
+type ExecPayloadsInfo struct {
 	ToBPayload  *ExecutionPayload           `json:"tobpayload"`
 	RoBPayloads map[string]ExecutionPayload `json:"robpayloads"`
 }
 
+type AnchorGetPayloadResponse struct {
+	Slot            uint64           `json:"slot"`
+	ExecPayloads    ExecPayloadsInfo `json:"execpayloads"`
+	ExecPayloadsSig bls.Signature    `json:"execpayloads_sig"`
+}
+
 func (msg *AnchorGetPayloadResponse) IsEmpty() bool {
-	return msg.ToBPayload == nil && len(msg.RoBPayloads) == 0
+	return msg.ExecPayloads.ToBPayload == nil && len(msg.ExecPayloads.RoBPayloads) == 0
 }
 
 func (msg *AnchorGetPayloadResponse) NumToBTxs() int {
-	if msg.ToBPayload == nil {
+	if msg.ExecPayloads.ToBPayload == nil {
 		return 0
 	}
-	return len(msg.ToBPayload.Transactions)
+	return len(msg.ExecPayloads.ToBPayload.Transactions)
 }
 
 func (msg *AnchorGetPayloadResponse) NumRoBTxs() int {
 	var numTxs int
-	for _, txs := range msg.RoBPayloads {
+	for _, txs := range msg.ExecPayloads.RoBPayloads {
 		numTxs = numTxs + len(txs.Transactions)
 	}
 	return numTxs
@@ -286,9 +292,64 @@ func NewAnchorGetPayloadResponse(slot uint64, needsToB bool) AnchorGetPayloadRes
 		payload := NewExecutionPayload()
 		tob = &payload
 	}
-	return AnchorGetPayloadResponse{
-		Slot:        slot,
+
+	execPayloads := ExecPayloadsInfo{
 		ToBPayload:  tob,
 		RoBPayloads: make(map[string]ExecutionPayload),
 	}
+
+	return AnchorGetPayloadResponse{
+		Slot:         slot,
+		ExecPayloads: execPayloads,
+	}
+}
+
+// VerifySignature verifies that the getHeader ExecPayloads have been signed with the given public key
+func VerifyHeaderSignatures2(response *AnchorGetHeaderResponse, pubKey bls.PublicKey) (bool, error) {
+	payloadHash, err := hashExecPayloads(&response.ExecPayloads)
+	if err != nil {
+		return false, err
+	}
+
+	execPayloadsBytes := response.ExecPayloadsSig.Bytes()
+	pubKeyBytes := pubKey.Bytes()
+
+	return bls.VerifySignatureBytes(payloadHash[:], execPayloadsBytes[:], pubKeyBytes[:])
+}
+
+// VerifySignature verifies that the getHeader ExecPayloads have been signed with the given public key
+func VerifyHeaderSignatures(response *AnchorGetHeaderResponse, pubKey bls.PublicKey) (bool, error) {
+	payloadHash, err := hashExecPayloads(&response.ExecPayloads)
+	if err != nil {
+		return false, err
+	}
+
+	payloadSignatureBytes := response.ExecPayloadsSig.Bytes()
+	pubKeyBytes := pubKey.Bytes()
+
+	return bls.VerifySignatureBytes(payloadHash[:], payloadSignatureBytes[:], pubKeyBytes[:])
+}
+
+func SignExecPayloads(payload *ExecHeadersInfo, secretKey *bls.SecretKey) (*bls.Signature, error) {
+	// Step 1: Hash the ExecPayloads (ToBHash + RoBHashes) data
+	payloadHash, err := hashExecPayloads(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: Sign the hashed payload using the secret key
+	signature := bls.Sign(secretKey, payloadHash[:])
+	return signature, nil
+}
+
+func hashExecPayloads(payload *ExecHeadersInfo) ([32]byte, error) {
+	// Use JSON serialization to hash the struct
+	payloadBytes, err := json.Marshal(*payload)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("failed to serialize ExecPayloads: %w", err)
+	}
+
+	// Use sha256 to hash the serialized ExecPayloads data
+	hash := sha256.Sum256(payloadBytes)
+	return hash, nil
 }
