@@ -31,6 +31,7 @@ import (
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	eth2ApiV1Bellatrix "github.com/attestantio/go-eth2-client/api/v1/bellatrix"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	fbls "github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/ssz"
 	flash "github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/go-utils/httplogger"
@@ -490,34 +491,24 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 				return
 			}
 
-			/*
-			   if !config.SkipRelaySignatureCheck {
-			     ok, err := checkRelaySignature(batonResponse, m.builderSigningDomain, relay.PublicKey)
-			     if err != nil {
-			       log.WithError(err).Error("error verifying relay signature")
-			       return
-			     }
-			     if !ok {
-			       log.Error("failed to verify relay signature")
-			       return
-			     }
-			   }
-			*/
-
-			/*
-				// Verify the relay signature in the relay response
-				if !config.SkipRelaySignatureCheck {
-					ok, err := checkRelaySignature(batonResponse, m.builderSigningDomain, relay.PublicKey)
-					if err != nil {
-						log.WithError(err).Error("error verifying relay signature")
-						return
-					}
-					if !ok {
-						log.Error("failed to verify relay signature")
-						return
-					}
+			// The below checks that the message came from Baton by verifying message signature against Baton's public key.
+			if !config.SkipRelaySignatureCheck {
+				relayBlsPubKey, err := fbls.PublicKeyFromBytes(relay.PublicKey[:])
+				if err != nil {
+					log.WithError(err).Error("relay public key could not be converted to bls pubkey")
+					return
 				}
-			*/
+
+				ok, err := VerifyHeaderSignature(batonResponse, *relayBlsPubKey)
+				if err != nil {
+					log.WithError(err).Error("error verifying relay signature")
+					return
+				}
+				if !ok {
+					log.Error("failed to verify relay signature")
+					return
+				}
+			}
 
 			// filter out invalid chunks
 			relayMinBid := m.relayMinBid.BigInt()
@@ -798,6 +789,25 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 			     return
 			   }
 			*/
+
+			// The below checks that the message came from Baton by verifying message signature against Baton's public key.
+			if !config.SkipRelaySignatureCheck {
+				relayBlsPubKey, err := fbls.PublicKeyFromBytes(relay.PublicKey[:])
+				if err != nil {
+					log.WithError(err).Error("relay public key could not be converted to bls pubkey")
+					return
+				}
+
+				ok, err := VerifyPayloadSignature(&localResult, *relayBlsPubKey)
+				if err != nil {
+					log.WithError(err).Error("error verifying relay signature")
+					return
+				}
+				if !ok {
+					log.Error("failed to verify relay signature")
+					return
+				}
+			}
 
 			// Lock before accessing the shared payload
 			mu.Lock()

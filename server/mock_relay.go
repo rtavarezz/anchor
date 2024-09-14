@@ -440,6 +440,12 @@ func (m *mockRelay) defaultHandleGetHeader(w http.ResponseWriter) {
 		response = MakeRandomAnchorGetHeaderResponse(1)
 	}
 
+	err := SignAnchorGetHeaderResponse(response, m.secretKey)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -518,11 +524,18 @@ func (m *mockRelay) defaultHandleGetPayload(w http.ResponseWriter) {
 
 	response, err := MakeRandomAnchorGetPayloadResponse(1, 1, true, robChainIDs)
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if m.GetPayloadResponse != nil {
 		response = m.GetPayloadResponse
+	}
+
+	err = SignAnchorGetPayloadResponse(response, m.secretKey)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/AnomalyFi/hypersdk/codec"
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
@@ -212,15 +213,28 @@ type AnchorHeader struct {
 }
 
 type AnchorGetHeaderResponse struct {
-	ExecPayloads    ExecHeadersInfo `json:"exec_payloads"`
-	BlockInfo       AnchorBlockInfo `json:"block_info"`
-	ExecPayloadsSig bls.Signature   `json:"exec_payloads_sig"` // signature used for signing the bid
+	ExecPayloads   ExecHeadersInfo `json:"exec_payloads"`
+	BlockInfo      AnchorBlockInfo `json:"block_info"`
+	ExecHeadersSig []byte          `json:"exec_payloads_sig"` // signature used for signing the bid
 }
 
 func NewAnchorGetHeaderResponse() *AnchorGetHeaderResponse {
 	return &AnchorGetHeaderResponse{
 		ExecPayloads: *NewExecPayloadsInfo(),
 	}
+}
+
+func (r *AnchorGetHeaderResponse) GetExecPayloadsSig() (*bls.Signature, error) {
+	signature, err := bls.SignatureFromBytes(r.ExecHeadersSig)
+	if err != nil {
+		return nil, errors.New("invalid exec headers sig, err: " + err.Error())
+	}
+	return signature, nil
+}
+
+func (r *AnchorGetHeaderResponse) SetExecPayloadsSig(sig *bls.Signature) {
+	signatureAsBytes := sig.Bytes()
+	r.ExecHeadersSig = signatureAsBytes[:]
 }
 
 func (msg *AnchorGetHeaderResponse) IsEmpty() bool {
@@ -249,11 +263,20 @@ type AnchorBlockInfo struct {
 	ProposerPubkey bls.PublicKey `json:"proposer_pubkey"`
 }
 
+// Note SignedHeaders is the signed execpayloads using SEQ's private key. It will be verified within Baton.
 type AnchorGetPayloadRequest struct {
-	Slot          uint64        `json:"slot"`
-	ProposerIndex uint64        `json:"proposer_index"`
-	BlockHash     string        `json:"block_hash"`
-	SignedHeaders bls.Signature `json:"signed_headers"`
+	Slot          uint64 `json:"slot"`
+	ProposerIndex uint64 `json:"proposer_index"`
+	BlockHash     string `json:"block_hash"`
+	SignedHeaders []byte `json:"signed_headers"`
+}
+
+func (r *AnchorGetPayloadRequest) GetSignedHeaders() (*bls.Signature, error) {
+	signature, err := bls.SignatureFromBytes(r.SignedHeaders)
+	if err != nil {
+		return nil, errors.New("invalid signed headers, err: " + err.Error())
+	}
+	return signature, nil
 }
 
 type ExecPayloadsInfo struct {
@@ -261,10 +284,24 @@ type ExecPayloadsInfo struct {
 	RoBPayloads map[string]ExecutionPayload `json:"robpayloads"`
 }
 
+// Note ExecPayloadsSig is the execpayloads with Baton's private key. It is verified by Anchor.
 type AnchorGetPayloadResponse struct {
 	Slot            uint64           `json:"slot"`
 	ExecPayloads    ExecPayloadsInfo `json:"execpayloads"`
-	ExecPayloadsSig bls.Signature    `json:"execpayloads_sig"`
+	ExecPayloadsSig []byte           `json:"execpayloads_sig"`
+}
+
+func (r *AnchorGetPayloadResponse) GetExecPayloadsSig() (*bls.Signature, error) {
+	signature, err := bls.SignatureFromBytes(r.ExecPayloadsSig)
+	if err != nil {
+		return nil, errors.New("invalid signed headers, err: " + err.Error())
+	}
+	return signature, nil
+}
+
+func (r *AnchorGetPayloadResponse) SetExecPayloadsSig(sig *bls.Signature) {
+	signatureAsBytes := sig.Bytes()
+	r.ExecPayloadsSig = signatureAsBytes[:]
 }
 
 func (msg *AnchorGetPayloadResponse) IsEmpty() bool {
@@ -304,47 +341,91 @@ func NewAnchorGetPayloadResponse(slot uint64, needsToB bool) AnchorGetPayloadRes
 	}
 }
 
-// VerifySignature verifies that the getHeader ExecPayloads have been signed with the given public key
-func VerifyHeaderSignatures2(response *AnchorGetHeaderResponse, pubKey bls.PublicKey) (bool, error) {
-	payloadHash, err := hashExecPayloads(&response.ExecPayloads)
+// VerifyHeaderSignature verifies that the getHeader ExecPayloads have been signed with the given public key
+func VerifyHeaderSignature(response *AnchorGetHeaderResponse, pubKey bls.PublicKey) (bool, error) {
+	payloadHash, err := hashExecHeaders(&response.ExecPayloads)
 	if err != nil {
 		return false, err
 	}
 
-	execPayloadsBytes := response.ExecPayloadsSig.Bytes()
-	pubKeyBytes := pubKey.Bytes()
-
-	return bls.VerifySignatureBytes(payloadHash[:], execPayloadsBytes[:], pubKeyBytes[:])
-}
-
-// VerifySignature verifies that the getHeader ExecPayloads have been signed with the given public key
-func VerifyHeaderSignatures(response *AnchorGetHeaderResponse, pubKey bls.PublicKey) (bool, error) {
-	payloadHash, err := hashExecPayloads(&response.ExecPayloads)
-	if err != nil {
-		return false, err
-	}
-
-	payloadSignatureBytes := response.ExecPayloadsSig.Bytes()
+	payloadSignatureBytes := response.ExecHeadersSig
 	pubKeyBytes := pubKey.Bytes()
 
 	return bls.VerifySignatureBytes(payloadHash[:], payloadSignatureBytes[:], pubKeyBytes[:])
 }
 
-func SignExecPayloads(payload *ExecHeadersInfo, secretKey *bls.SecretKey) (*bls.Signature, error) {
+// VerifyPayloadSignature verifies that the getHeader ExecPayloads have been signed with the given public key
+func VerifyPayloadSignature(response *AnchorGetPayloadResponse, pubKey bls.PublicKey) (bool, error) {
+	payloadHash, err := hashExecPayloads(&response.ExecPayloads)
+	if err != nil {
+		return false, err
+	}
+
+	payloadSignatureBytes := response.ExecPayloadsSig
+	pubKeyBytes := pubKey.Bytes()
+
+	return bls.VerifySignatureBytes(payloadHash[:], payloadSignatureBytes[:], pubKeyBytes[:])
+}
+
+func GetExecHeaderSignature(headers *ExecHeadersInfo, secretKey *bls.SecretKey) (*bls.Signature, error) {
 	// Step 1: Hash the ExecPayloads (ToBHash + RoBHashes) data
-	payloadHash, err := hashExecPayloads(payload)
+	payloadHash, err := hashExecHeaders(headers)
 	if err != nil {
 		return nil, err
 	}
 
-	// Step 2: Sign the hashed payload using the secret key
+	// Step 2: Sign the hashed headers using the secret key
 	signature := bls.Sign(secretKey, payloadHash[:])
 	return signature, nil
 }
 
-func hashExecPayloads(payload *ExecHeadersInfo) ([32]byte, error) {
+func GetExecPayloadSignature(payloads *ExecPayloadsInfo, secretKey *bls.SecretKey) (*bls.Signature, error) {
+	// Step 1: Hash the ExecPayloads (ToBHash + RoBHashes) data
+	payloadHash, err := hashExecPayloads(payloads)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: Sign the hashed payloads using the secret key
+	signature := bls.Sign(secretKey, payloadHash[:])
+	return signature, nil
+}
+
+func SignAnchorGetHeaderResponse(response *AnchorGetHeaderResponse, secretKey *bls.SecretKey) error {
+	signature, err := GetExecHeaderSignature(&response.ExecPayloads, secretKey)
+	if err != nil {
+		return errors.New("failed to sign anchor header response, err: " + err.Error())
+	}
+
+	response.SetExecPayloadsSig(signature)
+	return nil
+}
+
+func SignAnchorGetPayloadResponse(response *AnchorGetPayloadResponse, secretKey *bls.SecretKey) error {
+	signature, err := GetExecPayloadSignature(&response.ExecPayloads, secretKey)
+	if err != nil {
+		return errors.New("failed to sign anchor header response, err: " + err.Error())
+	}
+
+	response.SetExecPayloadsSig(signature)
+	return nil
+}
+
+func hashExecHeaders(headers *ExecHeadersInfo) ([32]byte, error) {
 	// Use JSON serialization to hash the struct
-	payloadBytes, err := json.Marshal(*payload)
+	payloadBytes, err := json.Marshal(*headers)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("failed to serialize ExecPayloads: %w", err)
+	}
+
+	// Use sha256 to hash the serialized ExecPayloads data
+	hash := sha256.Sum256(payloadBytes)
+	return hash, nil
+}
+
+func hashExecPayloads(payloads *ExecPayloadsInfo) ([32]byte, error) {
+	// Use JSON serialization to hash the struct
+	payloadBytes, err := json.Marshal(*payloads)
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("failed to serialize ExecPayloads: %w", err)
 	}

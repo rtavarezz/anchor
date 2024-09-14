@@ -265,15 +265,40 @@ func TestVerifyHeaderSignatures(t *testing.T) {
 
 	// Sign the exec payloads
 	headerMsg := MakeRandomAnchorGetHeaderResponse(1)
-	signature, err := SignExecPayloads(&headerMsg.ExecPayloads, secretKey)
+	signature, err := GetExecHeaderSignature(&headerMsg.ExecPayloads, secretKey)
 	require.NoError(t, err)
-	headerMsg.ExecPayloadsSig = *signature
+	headerMsg.SetExecPayloadsSig(signature)
 
 	// Verify the signature matches
 	pubKey, err := bls.PublicKeyFromSecretKey(secretKey)
 	require.NoError(t, err)
 
-	headerIsVerified, err := VerifyHeaderSignatures(headerMsg, *pubKey)
+	headerIsVerified, err := VerifyHeaderSignature(headerMsg, *pubKey)
+	require.NoError(t, err)
+	require.True(t, headerIsVerified)
+}
+
+func TestVerifyPayloadSignatures(t *testing.T) {
+	secretKey, err := bls.GenerateRandomSecretKey()
+	require.NoError(t, err)
+
+	// Sign the exec payloads
+	robChainIDS := make([]string, 0)
+	robChainIDS = append(robChainIDS, "chain_1")
+	robChainIDS = append(robChainIDS, "chain_2")
+
+	payloadRespMsg, err := MakeRandomAnchorGetPayloadResponse(uint64(1), 2, true, robChainIDS)
+	require.NoError(t, err)
+
+	signature, err := GetExecPayloadSignature(&payloadRespMsg.ExecPayloads, secretKey)
+	require.NoError(t, err)
+	payloadRespMsg.SetExecPayloadsSig(signature)
+
+	// Verify the signature matches
+	pubKey, err := bls.PublicKeyFromSecretKey(secretKey)
+	require.NoError(t, err)
+
+	headerIsVerified, err := VerifyPayloadSignature(payloadRespMsg, *pubKey)
 	require.NoError(t, err)
 	require.True(t, headerIsVerified)
 }
@@ -294,7 +319,6 @@ func TestGetHeader(t *testing.T) {
 
 	t.Run("Empty payload returns no status content", func(t *testing.T) {
 		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
-
 		resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, nil, nil)
 
 		// nil tob and rob will return no content.
@@ -728,42 +752,6 @@ func TestGetPayload(t *testing.T) {
 		BlockHash:     blockHash.String(),
 	}
 
-	/*
-		blockHash := _HexToHash("0x534809bd2b6832edff8d8ce4cb0e50068804fd1ef432c8362ad708a74fdc0e46")
-		payload := &eth2ApiV1Capella.SignedBlindedBeaconBlock{
-			Signature: _HexToSignature(
-				"0x8c795f751f812eabbabdee85100a06730a9904a4b53eedaa7f546fe0e23cd75125e293c6b0d007aa68a9da4441929d16072668abb4323bb04ac81862907357e09271fe414147b3669509d91d8ffae2ec9c789a5fcd4519629b8f2c7de8d0cce9"),
-			Message: &eth2ApiV1Capella.BlindedBeaconBlock{
-				Slot:          1,
-				ProposerIndex: 1,
-				ParentRoot:    phase0.Root{0x01},
-				StateRoot:     phase0.Root{0x02},
-				Body: &eth2ApiV1Capella.BlindedBeaconBlockBody{
-					RANDAOReveal: phase0.BLSSignature{0xa1},
-					ETH1Data: &phase0.ETH1Data{
-						BlockHash: blockHash[:],
-					},
-					Graffiti: phase0.Hash32{0xa2},
-					SyncAggregate: &altair.SyncAggregate{
-						SyncCommitteeBits: bitfield.NewBitvector512(),
-					},
-					ProposerSlashings: []*phase0.ProposerSlashing{},
-					AttesterSlashings: []*phase0.AttesterSlashing{},
-					Attestations:      []*phase0.Attestation{},
-					Deposits:          []*phase0.Deposit{},
-					VoluntaryExits:    []*phase0.SignedVoluntaryExit{},
-					ExecutionPayloadHeader: &capella.ExecutionPayloadHeader{
-						ParentHash:   _HexToHash("0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7"),
-						BlockHash:    blockHash,
-						BlockNumber:  12345,
-						FeeRecipient: _HexToAddress("0xdb65fEd33dc262Fe09D9a2Ba8F80b329BA25f941"),
-					},
-				},
-			},
-		}
-
-	*/
-
 	t.Run("Okay response from relay", func(t *testing.T) {
 		backend := newTestBackend(t, 1, time.Second*30)
 		rr := backend.request(t, http.MethodPost, path, payloadReq)
@@ -866,7 +854,6 @@ func TestGetPayload(t *testing.T) {
 	*/
 }
 
-// TODO: FIX ME
 func TestCheckRelays(t *testing.T) {
 	t.Run("One relay is okay", func(t *testing.T) {
 		backend := newTestBackend(t, 1, time.Second)
