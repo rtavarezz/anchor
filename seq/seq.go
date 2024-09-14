@@ -60,7 +60,7 @@ func (s *SeqClient) GenerateSeqTxsFromEthRaws(ctx context.Context, ethTxs []hexu
 	acts := make([]chain.Action, 0, len(ethTxs))
 	for _, ethTx := range ethTxs {
 		action := actions.SequencerMsg{
-			ChainId:     s.ChainID[:],
+			ChainID:     s.ChainID[:],
 			Data:        ethTx,
 			FromAddress: rsender,
 			RelayerID:   0,
@@ -75,7 +75,7 @@ func (s *SeqClient) GenerateSeqTxsFromEthRaws(ctx context.Context, ethTxs []hexu
 
 	txs := make([]*chain.Transaction, 0, len(ethTxs))
 	for _, act := range acts {
-		maxUnits, err := chain.EstimateUnits(parser.Rules(now), []chain.Action{act}, authFactory)
+		maxUnits, _, err := chain.EstimateUnits(parser.Rules(now), []chain.Action{act}, authFactory)
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +112,7 @@ func (s *SeqClient) GenerateSeqTx(ctx context.Context, act chain.Action) (*chain
 	authFactory := auth.NewED25519Factory(s.signer)
 	actionRegistry, authRegistry := parser.Registry()
 
-	maxUnits, err := chain.EstimateUnits(parser.Rules(now), []chain.Action{act}, authFactory)
+	maxUnits, _, err := chain.EstimateUnits(parser.Rules(now), []chain.Action{act}, authFactory)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,6 @@ func (s *SeqClient) GenerateTransferTx(ctx context.Context, asset ids.ID, to cod
 	act := &actions.Transfer{
 		To:    to,
 		Value: value,
-		Asset: asset,
 		Memo:  memo,
 	}
 
@@ -151,7 +150,7 @@ func (s *SeqClient) GenerateTransferTx(ctx context.Context, asset ids.ID, to cod
 	authFactory := auth.NewED25519Factory(s.signer)
 	actionRegistry, authRegistry := parser.Registry()
 
-	maxUnits, err := chain.EstimateUnits(parser.Rules(now), []chain.Action{act}, authFactory)
+	maxUnits, _, err := chain.EstimateUnits(parser.Rules(now), []chain.Action{act}, authFactory)
 	if err != nil {
 		return nil, err
 	}

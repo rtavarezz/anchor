@@ -5,8 +5,8 @@ go 1.21.12
 toolchain go1.22.5
 
 require (
-	github.com/AnomalyFi/hypersdk v0.9.5-beta.1
-	github.com/AnomalyFi/nodekit-seq v0.9.14-beta.1
+	github.com/AnomalyFi/hypersdk v0.9.6
+	github.com/AnomalyFi/nodekit-seq v0.9.16
 	github.com/ava-labs/avalanchego v1.11.10
 	github.com/ethereum/go-ethereum v1.13.14
 	github.com/flashbots/go-boost-utils v1.8.1
@@ -14,8 +14,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/holiman/uint256 v1.2.4
-	github.com/labstack/gommon v0.4.0
-	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e
@@ -79,11 +77,10 @@ require (
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.10.1 // indirect
+	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7 // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/supranational/blst v0.3.11 // indirect
-	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.opentelemetry.io/otel v1.22.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.22.0 // indirect
