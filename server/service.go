@@ -2,10 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/common"
 	"io"
 	"log"
 	"math/big"
@@ -17,16 +17,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	seqconsts "github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/hypersdk/chain"
+	"github.com/AnomalyFi/hypersdk/crypto/ed25519"
 	"github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
 	"github.com/AnomalyFi/anchor/config"
+	"github.com/AnomalyFi/anchor/seq"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	eth2ApiV1Bellatrix "github.com/attestantio/go-eth2-client/api/v1/bellatrix"
@@ -130,6 +134,9 @@ type AnchorService struct {
 	mockChunkRoB     map[string][]hexutil.Bytes
 	mockCurrNonce    uint64
 	mockExpectedSlot uint64
+
+	// SEQ
+	seqCli *seq.SeqClient
 }
 
 // go program calls this on boot up automatically
@@ -144,6 +151,21 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 	}
 
 	builderSigningDomain, err := ComputeDomain(ssz.DomainTypeAppBuilder, opts.GenesisForkVersionHex, phase0.Root{}.String())
+	if err != nil {
+		return nil, err
+	}
+
+	seqSiginingKeyBytes, err := hex.DecodeString(config.SeqSigningKey)
+	if err != nil {
+		return nil, err
+	}
+	seqSigningKey := ed25519.PrivateKey(seqSiginingKeyBytes)
+	seqChainID, err := ids.FromString(config.SeqChainID)
+	if err != nil {
+		return nil, err
+	}
+
+	seqCli, err := seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +200,8 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 		},
 		requestMaxRetries: opts.RequestMaxRetries,
 		mockMode:          opts.MockMode,
+
+		seqCli: seqCli,
 	}, nil
 }
 
@@ -872,12 +896,41 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 
 	res := NewSEQPayloadResponse(payloadReq.Slot)
 	res.Slot = payloadReq.Slot
-	res.ToBPayload.Transactions = m.mockChunkToB
+
+	seqTxs, err := m.seqCli.GenerateSeqTxsFromEthRaws(context.TODO(), m.mockChunkToB)
+	if err != nil {
+		log.WithError(err).Error("could not generate seq txs")
+		m.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	txsRaw, err := chain.MarshalTxs(seqTxs)
+	if err != nil {
+		log.WithError(err).Error("could not marshal seq txs")
+		m.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	res.ToBPayload.Transactions = txsRaw
 
 	for k, v := range m.mockChunkRoB {
+		seqTxs, err := m.seqCli.GenerateSeqTxsFromEthRaws(context.TODO(), v)
+		if err != nil {
+			log.WithError(err).Error("could not generate seq txs")
+			m.respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		txsRaw, err := chain.MarshalTxs(seqTxs)
+		if err != nil {
+			log.WithError(err).Error("could not marshal seq txs")
+			m.respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		res.RoBPayloads[k] = ExecutionPayload2{
 			Slot:         m.mockExpectedSlot,
-			Transactions: v,
+			Transactions: txsRaw,
 		}
 	}
 

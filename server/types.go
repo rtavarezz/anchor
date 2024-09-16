@@ -67,9 +67,8 @@ func (bid *OPBid) IsEmpty() bool {
 type ExecutionPayload2 struct {
 	Slot      uint64      `json:"slot"`
 	BlockHash common.Hash `json:"blockHash"`
-	// Array of transaction objects, each object is a byte list (DATA) representing
-	// TransactionType || TransactionPayload or LegacyTransaction as defined in EIP-2718
-	Transactions []Data `json:"transactions"`
+	// SEQ marshalled txs
+	Transactions []byte `json:"transactions"`
 }
 
 // e.g seq sends request to Anchor
