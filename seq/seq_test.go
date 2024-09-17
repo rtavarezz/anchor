@@ -1,5 +1,7 @@
 package seq
 
+// Below can only be run in SEQ is running.
+/*
 import (
 	"context"
 	"encoding/hex"
@@ -55,3 +57,4 @@ func TestGenSeqTx(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Printf("tx submitted: %s\n", txID.String())
 }
+*/

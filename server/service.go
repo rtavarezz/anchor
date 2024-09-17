@@ -135,7 +135,8 @@ type AnchorService struct {
 	mockCurrNonce    uint64
 	mockExpectedSlot uint64
 
-	// SEQ
+	// SEQ client
+	// not created when mock mode enabled
 	seqCli *seq.SeqClient
 }
 
@@ -165,9 +166,12 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 		return nil, err
 	}
 
-	seqCli, err := seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
-	if err != nil {
-		return nil, err
+	var seqCli *seq.SeqClient
+	if !opts.MockMode {
+		seqCli, err = seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &AnchorService{
@@ -484,27 +488,27 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 				return
 			}
 
-			hasToB := batonResponse.ExecPayloads.ToBHash != nil
-			if hasToB && *batonResponse.ExecPayloads.ToBHash.Header == nilHash2 {
+			hasToB := batonResponse.ExecHeaders.ToBHash != nil
+			if hasToB && *batonResponse.ExecHeaders.ToBHash.Header == nilHash2 {
 				log.Warn("baton responded with empty tob block hash")
 				return
 			}
 
 			var tobValue uint64
 			if hasToB {
-				tobValue = batonResponse.ExecPayloads.ToBHash.Value.Uint64()
+				tobValue = batonResponse.ExecHeaders.ToBHash.Value.Uint64()
 			}
 
 			var robValues string
-			for chainID, robChunk := range batonResponse.ExecPayloads.RoBHashes {
+			for chainID, robChunk := range batonResponse.ExecHeaders.RoBHashes {
 				robValues = robValues + "[" + chainID + ":" + robChunk.Value.String() + "], "
 			}
 
 			log = log.WithFields(logrus.Fields{
-				"slot":       batonResponse.BlockInfo.Slot,
-				"chunk_hash": batonResponse.BlockInfo.ChunkHash,
-				"tob_value":  tobValue,
-				"rob_values": robValues,
+				"slot":         batonResponse.BlockInfo.Slot,
+				"headers_hash": batonResponse.HeadersHash,
+				"tob_value":    tobValue,
+				"rob_values":   robValues,
 			})
 
 			// TODO: Add proposer pub key to Baton responses
@@ -536,16 +540,16 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 
 			// filter out invalid chunks
 			relayMinBid := m.relayMinBid.BigInt()
-			if hasToB && !VerifyHeader(batonResponse.ExecPayloads.ToBHash, relayMinBid, log) {
-				batonResponse.ExecPayloads.ToBHash = nil
+			if hasToB && !VerifyHeader(batonResponse.ExecHeaders.ToBHash, relayMinBid, log) {
+				batonResponse.ExecHeaders.ToBHash = nil
 				hasToB = false
 				log.Info("filtering out tob block")
 				chunksNotGood.Store(true)
 			}
 
-			for chainID, robChunk := range batonResponse.ExecPayloads.RoBHashes {
+			for chainID, robChunk := range batonResponse.ExecHeaders.RoBHashes {
 				if !VerifyHeader(robChunk, relayMinBid, log) {
-					delete(batonResponse.ExecPayloads.RoBHashes, chainID)
+					delete(batonResponse.ExecHeaders.RoBHashes, chainID)
 					log.Info("filtering out rob block for chain id: ", chainID)
 					chunksNotGood.Store(true)
 				}
@@ -554,14 +558,14 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			mu.Lock()
 			defer mu.Unlock()
 
-			if batonResponse.ExecPayloads.ToBHash != nil {
-				relays[BlockHashHex(batonResponse.ExecPayloads.ToBHash.BlockHash)] = append(relays[BlockHashHex(batonResponse.ExecPayloads.ToBHash.BlockHash)], relay)
+			if batonResponse.ExecHeaders.ToBHash != nil {
+				relays[BlockHashHex(batonResponse.ExecHeaders.ToBHash.BlockHash)] = append(relays[BlockHashHex(batonResponse.ExecHeaders.ToBHash.BlockHash)], relay)
 			}
 
 			if hasToB {
-				result.ToBHash = batonResponse.ExecPayloads.ToBHash.Header
+				result.ToBHash = batonResponse.ExecHeaders.ToBHash.Header
 			}
-			for chainID, robChunk := range batonResponse.ExecPayloads.RoBHashes {
+			for chainID, robChunk := range batonResponse.ExecHeaders.RoBHashes {
 				result.RoBHashes[chainID] = *robChunk.Header
 			}
 
@@ -589,7 +593,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 
 	// TODO: Verify bid key cache usage
 	// Remember the bid, for future logging in case of withholding
-	bidKey := bidRespKey{slot: _slot, blockHash: batonResponse.BlockInfo.ChunkHash.String()}
+	bidKey := bidRespKey{slot: _slot, blockHash: batonResponse.HeadersHash.String()}
 	m.bidsLock.Lock()
 	bidResp := bidResp{
 		t:       time.Now(),
@@ -728,7 +732,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	log = log.WithFields(logrus.Fields{
 		"ua":        ua,
 		"slot":      slot,
-		"blockHash": payloadReq.BlockHash,
+		"blockHash": payloadReq.HeadersHash,
 		"slotUID":   currentSlotUID,
 	})
 
@@ -742,7 +746,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	}).Infof("submitBlindedBlock request start - %d milliseconds into slot %d", msIntoSlot, slot)
 
 	// Get the bid!
-	bidKey := bidRespKey{slot: slot, blockHash: payloadReq.BlockHash}
+	bidKey := bidRespKey{slot: slot, blockHash: payloadReq.HeadersHash}
 	m.bidsLock.Lock()
 	originalBid := m.bids[bidKey]
 	m.bidsLock.Unlock()
@@ -897,24 +901,8 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 	res := NewSEQPayloadResponse(payloadReq.Slot)
 	res.Slot = payloadReq.Slot
 
-	seqTxs, err := m.seqCli.GenerateSeqTxsFromEthRaws(context.TODO(), m.mockChunkToB)
-	if err != nil {
-		log.WithError(err).Error("could not generate seq txs")
-		m.respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	txsRaw, err := chain.MarshalTxs(seqTxs)
-	if err != nil {
-		log.WithError(err).Error("could not marshal seq txs")
-		m.respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	res.ToBPayload.Transactions = txsRaw
-
-	for k, v := range m.mockChunkRoB {
-		seqTxs, err := m.seqCli.GenerateSeqTxsFromEthRaws(context.TODO(), v)
+	if !m.mockMode {
+		seqTxs, err := m.seqCli.GenerateSeqTxsFromEthRaws(context.TODO(), m.mockChunkToB)
 		if err != nil {
 			log.WithError(err).Error("could not generate seq txs")
 			m.respondError(w, http.StatusBadRequest, err.Error())
@@ -928,9 +916,27 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 			return
 		}
 
-		res.RoBPayloads[k] = ExecutionPayload2{
-			Slot:         m.mockExpectedSlot,
-			Transactions: txsRaw,
+		res.ToBPayload.Transactions = txsRaw
+
+		for k, v := range m.mockChunkRoB {
+			seqTxs, err := m.seqCli.GenerateSeqTxsFromEthRaws(context.TODO(), v)
+			if err != nil {
+				log.WithError(err).Error("could not generate seq txs")
+				m.respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+
+			txsRaw, err := chain.MarshalTxs(seqTxs)
+			if err != nil {
+				log.WithError(err).Error("could not marshal seq txs")
+				m.respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+
+			res.RoBPayloads[k] = ExecutionPayload2{
+				Slot:         m.mockExpectedSlot,
+				Transactions: txsRaw,
+			}
 		}
 	}
 

@@ -266,14 +266,14 @@ func generateRandomHash() (common.Hash, error) {
 }
 
 func MakeRandomExecutionPayload(numTx int) (*ExecutionPayload, error) {
-	txs := make([]hexutil.Bytes, numTx)
+	txs := make([]byte, numTx)
 	for i := 0; i < numTx; i++ {
 		randHash, err := generateRandomHash()
 		if err != nil {
 			return nil, err
 		}
 
-		txs[i] = randHash.Bytes()
+		txs = append(txs, randHash.Bytes()...)
 	}
 
 	return &ExecutionPayload{
@@ -375,13 +375,12 @@ func MakeRandomAnchorGetHeaderResponse(slot uint64) *AnchorGetHeaderResponse {
 		Slot: slot,
 		// nodeID of chunk producing validator.
 		Producer:       ids.NodeID{1},
-		ChunkHash:      common.Hash{},
 		ProposerPubkey: *mockRelayPublicKey,
 	}
 
 	resp := AnchorGetHeaderResponse{
-		ExecPayloads: execPayloads,
-		BlockInfo:    anchorBlockInfo,
+		ExecHeaders: execPayloads,
+		BlockInfo:   anchorBlockInfo,
 	}
 
 	return &resp
@@ -391,7 +390,7 @@ func MakeRandomAnchorGetHeaderResponse(slot uint64) *AnchorGetHeaderResponse {
 // Note a response may or may not have a ToB response.
 func (m *mockRelay) MakeAnchorGetHeaderResponse(
 	slot uint64,
-	chunkHash *common.Hash,
+	headersHash *common.Hash,
 	tobHeader *AnchorHeader,
 	robHeaders *map[string]*AnchorHeader,
 ) *AnchorGetHeaderResponse {
@@ -399,16 +398,16 @@ func (m *mockRelay) MakeAnchorGetHeaderResponse(
 	resp.BlockInfo.Slot = slot
 	resp.BlockInfo.ProposerPubkey = *mockRelayPublicKey
 
-	if chunkHash != nil {
-		resp.BlockInfo.ChunkHash = *chunkHash
+	if headersHash != nil {
+		resp.HeadersHash = *headersHash
 	}
 
 	if tobHeader != nil {
-		resp.ExecPayloads.ToBHash = tobHeader
+		resp.ExecHeaders.ToBHash = tobHeader
 	}
 
 	if robHeaders != nil {
-		resp.ExecPayloads.RoBHashes = *robHeaders
+		resp.ExecHeaders.RoBHashes = *robHeaders
 	}
 
 	return resp
