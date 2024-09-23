@@ -744,13 +744,14 @@ func TestGetHeaderBids(t *testing.T) {
 func TestGetPayload(t *testing.T) {
 	path := "/eth/v1/builder/blinded_blocks"
 
-	headersHash, err := generateRandomHash()
+	parentHash, err := generateRandomHash()
 	require.Nil(t, err)
 
+	pubKeyBytes := mockRelayPublicKey.Bytes()
 	payloadReq := AnchorGetPayloadRequest{
-		Slot:          1,
-		ProposerIndex: 1,
-		HeadersHash:   headersHash.String(),
+		Slot:           1,
+		ProposerPubKey: pubKeyBytes[:],
+		ParentHash:     parentHash.String(),
 	}
 
 	t.Run("Okay response from relay", func(t *testing.T) {

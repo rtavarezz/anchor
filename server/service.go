@@ -730,10 +730,10 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	ua := UserAgent(req.Header.Get("User-Agent"))
 	slot := payloadReq.Slot
 	log = log.WithFields(logrus.Fields{
-		"ua":        ua,
-		"slot":      slot,
-		"blockHash": payloadReq.HeadersHash,
-		"slotUID":   currentSlotUID,
+		"ua":         ua,
+		"slot":       slot,
+		"parentHash": payloadReq.ParentHash,
+		"slotUID":    currentSlotUID,
 	})
 
 	// Log how late into the slot the request starts
@@ -746,7 +746,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	}).Infof("submitBlindedBlock request start - %d milliseconds into slot %d", msIntoSlot, slot)
 
 	// Get the bid!
-	bidKey := bidRespKey{slot: slot, blockHash: payloadReq.HeadersHash}
+	bidKey := bidRespKey{slot: slot, blockHash: payloadReq.ParentHash}
 	m.bidsLock.Lock()
 	originalBid := m.bids[bidKey]
 	m.bidsLock.Unlock()
