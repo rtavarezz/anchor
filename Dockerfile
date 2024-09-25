@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.20 as builder
+FROM golang:1.23 AS builder
 ARG VERSION
 WORKDIR /build
 
@@ -9,11 +9,12 @@ COPY go.sum ./
 RUN go mod download
 
 ADD . .
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath \
-    -v \
-    -ldflags "-w -s -X 'github.com/AnomalyFi/anchor/config.Version=$VERSION'" \
-    -o mev-boost .
+RUN --mount=type=cache,target=/root/.cache/go-build GOOS=linux go build -trimpath -ldflags "-w -s -X cmd.Version=$VERSION -X main.Version=$VERSION" -v -o mev-boost .
+# RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=linux go build \
+#     -trimpath \
+#     -v \
+#     -ldflags "-w -s -X 'github.com/AnomalyFi/anchor/config.Version=$VERSION'" \
+#     -o mev-boost .
 
 FROM alpine
 WORKDIR /app

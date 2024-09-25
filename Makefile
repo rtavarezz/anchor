@@ -77,7 +77,7 @@ run-mergemock-integration: build
 
 .PHONY: docker-image
 docker-image:
-	DOCKER_BUILDKIT=1 docker build --platform linux/amd64 --build-arg VERSION=${VERSION} . -t mev-boost
+	DOCKER_BUILDKIT=1 CGO_ENABLED=0 docker build --platform linux/amd64 --build-arg VERSION=${VERSION} . -t mev-boost
 	docker tag mev-boost:latest ${DOCKER_REPO}:${VERSION}
 	docker tag mev-boost:latest ${DOCKER_REPO}:latest
 
