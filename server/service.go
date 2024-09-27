@@ -584,7 +584,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 
 	// TODO: Verify bid key cache usage
 	// Remember the bid, for future logging in case of withholding
-	bidKey := bidRespKey{slot: _slot}
+	bidKey := bidRespKey{slot: _slot, blockHash: batonResponse.ParentHash.String()}
 	m.bidsLock.Lock()
 	bidResp := bidResp{
 		t:       time.Now(),
