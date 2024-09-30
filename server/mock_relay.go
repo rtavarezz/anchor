@@ -3,10 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/log"
-	"golang.org/x/exp/rand"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +10,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ava-labs/avalanchego/ids"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
+	"golang.org/x/exp/rand"
 
 	builderApiCapella "github.com/attestantio/go-builder-client/api/capella"
 	builderApiDeneb "github.com/attestantio/go-builder-client/api/deneb"
@@ -398,9 +399,9 @@ func (m *mockRelay) MakeAnchorGetHeaderResponse(
 	resp.BlockInfo.Slot = slot
 	resp.BlockInfo.ProposerPubkey = *mockRelayPublicKey
 
-	if headersHash != nil {
-		resp.HeadersHash = *headersHash
-	}
+	// if headersHash != nil {
+	// 	resp.HeadersHash = *headersHash
+	// }
 
 	if tobHeader != nil {
 		resp.ExecHeaders.ToBHash = tobHeader

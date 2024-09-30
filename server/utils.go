@@ -6,9 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	core "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"golang.org/x/exp/rand"
 	"io"
 	"log"
 	"math/big"
@@ -16,6 +13,10 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	core "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/anchor/config"
 	builderApi "github.com/attestantio/go-builder-client/api"
@@ -189,7 +190,7 @@ func GetURI(url *url.URL, path string) string {
 // bidResp are entries in the bids cache
 type bidResp struct {
 	t       time.Time
-	bidInfo SEQHeaderResponse
+	bidInfo *AnchorGetHeaderResponse
 	relays  []RelayEntry
 }
 

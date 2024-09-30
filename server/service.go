@@ -452,7 +452,6 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 	}
 
 	// Prepare relay responses
-	result := NewSEQHeaderResponse(_slot)
 	batonResponse := new(AnchorGetHeaderResponse)
 	relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
 	var responseIsGood atomic.Bool
@@ -505,10 +504,9 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			}
 
 			log = log.WithFields(logrus.Fields{
-				"slot":         batonResponse.BlockInfo.Slot,
-				"headers_hash": batonResponse.HeadersHash,
-				"tob_value":    tobValue,
-				"rob_values":   robValues,
+				"slot":       batonResponse.BlockInfo.Slot,
+				"tob_value":  tobValue,
+				"rob_values": robValues,
 			})
 
 			// TODO: Add proposer pub key to Baton responses
@@ -562,13 +560,6 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 				relays[BlockHashHex(batonResponse.ExecHeaders.ToBHash.BlockHash)] = append(relays[BlockHashHex(batonResponse.ExecHeaders.ToBHash.BlockHash)], relay)
 			}
 
-			if hasToB {
-				result.ToBHash = batonResponse.ExecHeaders.ToBHash.Header
-			}
-			for chainID, robChunk := range batonResponse.ExecHeaders.RoBHashes {
-				result.RoBHashes[chainID] = *robChunk.Header
-			}
-
 			responseIsGood.Store(true)
 		}(relay)
 
@@ -579,7 +570,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 	// After waiting here, we should
 	wg.Wait()
 
-	if result.IsEmpty() {
+	if batonResponse.IsEmpty() {
 		log.Info("no seq header response had no valid chunks")
 
 		if chunksNotGood.Load() {
@@ -593,18 +584,18 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 
 	// TODO: Verify bid key cache usage
 	// Remember the bid, for future logging in case of withholding
-	bidKey := bidRespKey{slot: _slot, blockHash: batonResponse.HeadersHash.String()}
+	bidKey := bidRespKey{slot: _slot, blockHash: batonResponse.ParentHash.String()}
 	m.bidsLock.Lock()
 	bidResp := bidResp{
 		t:       time.Now(),
-		bidInfo: result,
+		bidInfo: batonResponse,
 	}
 
 	m.bids[bidKey] = bidResp
 	m.bidsLock.Unlock()
 
 	// Return the bid
-	m.respondOK(w, result)
+	m.respondOK(w, batonResponse)
 }
 
 // Mock implementation

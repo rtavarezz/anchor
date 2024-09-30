@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
+
 	"github.com/AnomalyFi/hypersdk/codec"
 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/flashbots/go-boost-utils/bls"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -249,7 +250,6 @@ type AnchorGetHeaderResponse struct {
 	ExecHeaders ExecHeadersInfo `json:"exec_headers"`
 	BlockInfo   AnchorBlockInfo `json:"block_info"`
 	ParentHash  common.Hash     `json:"parent_hash"`
-	HeadersHash common.Hash     `json:"headers_hash"`
 	// Exec headers signed by baton's key.
 	ExecHeadersSig []byte `json:"exec_headers_sig"`
 }
