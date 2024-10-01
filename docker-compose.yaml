@@ -9,8 +9,9 @@ services:
       context: .
     ports:
       - "$RPC_PORT:18550"
-    command: >
-      -mock-mode
+    entrypoint: 
+      - "/app/mev-boost"
+      - "-mainnet"
     environment:
       - "LOG_LEVEL=debug"
       - "RELAYS=$RELAYS" # scheme://pubkey@host,scheme://pb2@host2, e.g. http://0xtest@baton.url:8080,...

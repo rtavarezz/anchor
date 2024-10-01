@@ -398,18 +398,17 @@ func (m *AnchorService) handleRegisterValidator(w http.ResponseWriter, req *http
 func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	slot := vars["slot"]
-	parentHashHex := vars["parent_hash"]
+	parentHashStr := vars["parent_hash"]
 	pubkey := vars["pubkey"]
 
 	ua := UserAgent(req.Header.Get("User-Agent"))
 	log := m.log.WithFields(logrus.Fields{
 		"method":     "getHeader",
 		"slot":       slot,
-		"parentHash": parentHashHex,
+		"parentHash": parentHashStr,
 		"pubkey":     pubkey,
 		"ua":         ua,
 	})
-	log.Debug("getHeader")
 
 	_slot, err := strconv.ParseUint(slot, 10, 64)
 	if err != nil {
@@ -422,7 +421,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	if len(parentHashHex) != 66 {
+	if _, err := ids.FromString(parentHashStr); err != nil {
 		m.respondError(w, http.StatusBadRequest, errInvalidHash.Error())
 		return
 	}
@@ -466,7 +465,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		// TODO: Since we know there is only a single Baton instance. We could probably cut out the goroutine.
 		go func(relay RelayEntry) {
 			defer wg.Done()
-			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashHex, pubkey)
+			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashStr, pubkey)
 			url := relay.GetURI(path)
 			log := log.WithField("url", url)
 
@@ -514,6 +513,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			reqPubKey := batonResponse.BlockInfo.ProposerPubkey.Bytes()
 			if relayPubKey != reqPubKey {
 				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), batonResponse.BlockInfo.ProposerPubkey.String())
+				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
