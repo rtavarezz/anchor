@@ -6,6 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	builderApi "github.com/attestantio/go-builder-client/api"
+	"github.com/attestantio/go-eth2-client/spec"
+	core "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/flashbots/go-boost-utils/bls"
+	"golang.org/x/exp/rand"
 	"io"
 	"log"
 	"math/big"
@@ -14,20 +20,11 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"golang.org/x/exp/rand"
-
 	"github.com/AnomalyFi/anchor/config"
-	builderApi "github.com/attestantio/go-builder-client/api"
-	builderSpec "github.com/attestantio/go-builder-client/spec"
-	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/ssz"
-	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 )
 
@@ -200,6 +197,8 @@ type bidRespKey struct {
 	blockHash string
 }
 
+// Use the below when we have multiple baton instances
+/*
 // bidInfo is used to store bid response fields for logging and validation
 type bidInfo struct {
 	blockHash   phase0.Hash32
@@ -209,6 +208,7 @@ type bidInfo struct {
 	txRoot      phase0.Root
 	value       *uint256.Int
 }
+*/
 
 func httpClientDisallowRedirects(_ *http.Request, _ []*http.Request) error {
 	return http.ErrUseLastResponse
@@ -220,24 +220,6 @@ func weiBigIntToEthBigFloat(wei *big.Int) (ethValue *big.Float) {
 	fbalance.SetString(wei.String())
 	ethValue = new(big.Float).Quo(fbalance, big.NewFloat(1e18))
 	return
-}
-
-func checkRelaySignature(bid *builderSpec.VersionedSignedBuilderBid, domain phase0.Domain, pubKey phase0.BLSPubKey) (bool, error) {
-	root, err := bid.MessageHashTreeRoot()
-	if err != nil {
-		return false, err
-	}
-	sig, err := bid.Signature()
-	if err != nil {
-		return false, err
-	}
-	signingData := phase0.SigningData{ObjectRoot: root, Domain: domain}
-	msg, err := signingData.HashTreeRoot()
-	if err != nil {
-		return false, err
-	}
-
-	return bls.VerifySignatureBytes(msg[:], sig[:], pubKey[:])
 }
 
 func getPayloadResponseIsEmpty(payload *builderApi.VersionedSubmitBlindedBlockResponse) bool {
@@ -277,7 +259,7 @@ func CreateTransaction(nonce uint64, value big.Int, gasLimit uint64, gasPrice bi
 	return tx
 }
 
-// makes txs into byte form and signs txs
+// CreateTransactionAsTxBytes makes txs into byte form and signs txs
 func CreateTransactionAsTxBytes(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) hexutil.Bytes {
 	privateKey, err := crypto.HexToECDSA(TestPrivateKeyValue)
 	if err != nil {
@@ -326,7 +308,7 @@ func PopulateRandomHash32() common.Hash {
 	return data
 }
 
-// Verifies that a given header is good
+// VerifyHeader verifies that a given header is good
 func VerifyHeader(header *AnchorHeader, relayMinBid *big.Int, log *logrus.Entry) bool {
 	if header.Header == nil {
 		log.Info("header due to nil header")

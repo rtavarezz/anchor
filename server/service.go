@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,12 +19,10 @@ import (
 
 	seqconsts "github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/hypersdk/chain"
 	"github.com/AnomalyFi/hypersdk/crypto/ed25519"
-	"github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
 	"github.com/AnomalyFi/anchor/config"
@@ -51,14 +47,10 @@ var (
 	errInvalidPubkey             = errors.New("invalid pubkey")
 	errNoSuccessfulRelayResponse = errors.New("no successful relay response")
 	errServerAlreadyRunning      = errors.New("server already running")
-	errInvalidToBTxs             = errors.New("invalid ToBTxs")
-	errInvalidRoBChains          = errors.New("invalid RoBChains")
-	errInvalidRoBChunkTxs        = errors.New("invalid RoBChunkTxs")
 )
 
 var (
-	value big.Int
-	data  string
+	data string
 )
 
 var (
@@ -127,11 +119,7 @@ type AnchorService struct {
 	slotUIDLock sync.Mutex
 
 	// Below used only for testing
-	mockMode         bool
-	mockChunkToB     []hexutil.Bytes
-	mockChunkRoB     map[string][]hexutil.Bytes
-	mockCurrNonce    uint64
-	mockExpectedSlot uint64
+	mockMode bool
 
 	// SEQ client
 	// not created when mock mode enabled
@@ -207,19 +195,6 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 	}, nil
 }
 
-// Intended for testing only
-func (m *AnchorService) getNextMockNonce() uint64 {
-	nonce := m.mockCurrNonce
-	m.mockCurrNonce++
-	return nonce
-}
-
-func (m *AnchorService) incrNextMockNonce(delta uint64) uint64 {
-	nonce := m.mockCurrNonce
-	m.mockCurrNonce += delta
-	return nonce
-}
-
 func (m *AnchorService) respondError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -251,8 +226,8 @@ func (m *AnchorService) getRouter() http.Handler {
 	r.HandleFunc(pathGetPayload, m.handleGetPayload).Methods(http.MethodPost)
 
 	// These are mock handlers for the SEQ-Anchor interface. This will be stubbed in for now.
-	r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
-	r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
+	//r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
+	//r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
 
 	r.Use(mux.CORSMethodMiddleware(r))
 	loggedRouter := httplogger.LoggingMiddlewareLogrus(m.log, r)
@@ -600,6 +575,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 	m.respondOK(w, batonResponse)
 }
 
+/*
 // Mock implementation
 func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Request) {
 	//TODO: everytime this function is called, we need mock chunks
@@ -685,6 +661,7 @@ func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Reques
 
 	m.respondOK(w, res)
 }
+*/
 
 // original implementation
 func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
@@ -706,8 +683,6 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 		m.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	// @TODO: Check the signature. Does it match the one we want?
 
 	// Get the currentSlotUID for this slot
 	currentSlotUID := ""
@@ -862,6 +837,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	m.respondOK(w, result)
 }
 
+/*
 // Mock custom handler. Note this is a true mock. It does no checking of the info
 // received from SEQ and just sends the payload back.
 func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Request) {
@@ -891,7 +867,7 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 		m.respondError(w, http.StatusBadRequest, errorMsg)
 	}
 
-	res := NewSEQPayloadResponse(payloadReq.Slot)
+	res := NewAnchorGetPayloadResponse(payloadReq.Slot)
 	res.Slot = payloadReq.Slot
 
 	if !m.mockMode {
@@ -935,6 +911,7 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 
 	m.respondOK(w, res)
 }
+*/
 
 // CheckRelays sends a request to each one of the relays previously registered to get their status
 func (m *AnchorService) CheckRelays() int {
@@ -992,11 +969,9 @@ func (*ServerParser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *AnchorService) ServerParser(ctx context.Context, networkId uint32, chainId ids.ID) chain.Parser {
-	//g := j.c.Genesis()
-
+func (m *AnchorService) ServerParser(ctx context.Context, networkID uint32, chainID ids.ID) chain.Parser {
 	// The only thing this is using is the ActionRegistry and AuthRegistry so this should be fine
-	return &Parser{networkId, chainId, nil}
+	return &Parser{networkID, chainID, nil}
 }
 
 var _ chain.Parser = (*Parser)(nil)
@@ -1016,10 +991,10 @@ func (p *Parser) Rules(t int64) chain.Rules {
 }
 
 func (*Parser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
-	return consts.ActionRegistry, consts.AuthRegistry
+	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *AnchorService) Parser(ctx context.Context, networkID uint32, chainId ids.ID) (chain.Parser, error) {
+func (m *AnchorService) Parser(ctx context.Context, networkID uint32, chainID ids.ID) (chain.Parser, error) {
 
-	return &Parser{networkID, chainId, nil}, nil
+	return &Parser{networkID, chainID, nil}, nil
 }
