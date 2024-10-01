@@ -57,10 +57,8 @@ var (
 )
 
 var (
-	value    big.Int
-	gasLimit uint64
-	gasPrice big.Int
-	data     string
+	value big.Int
+	data  string
 )
 
 var (
@@ -398,14 +396,14 @@ func (m *AnchorService) handleRegisterValidator(w http.ResponseWriter, req *http
 func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	slot := vars["slot"]
-	parentHashHex := vars["parent_hash"]
+	parentHash := vars["parent_hash"]
 	pubkey := vars["pubkey"]
 
 	ua := UserAgent(req.Header.Get("User-Agent"))
 	log := m.log.WithFields(logrus.Fields{
 		"method":     "getHeader",
 		"slot":       slot,
-		"parentHash": parentHashHex,
+		"parentHash": parentHash,
 		"pubkey":     pubkey,
 		"ua":         ua,
 	})
@@ -422,7 +420,8 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	if len(parentHashHex) != 66 {
+	//
+	if len(parentHash) > 66 {
 		m.respondError(w, http.StatusBadRequest, errInvalidHash.Error())
 		return
 	}
@@ -466,11 +465,12 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		// TODO: Since we know there is only a single Baton instance. We could probably cut out the goroutine.
 		go func(relay RelayEntry) {
 			defer wg.Done()
-			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashHex, pubkey)
+			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHash, pubkey)
 			url := relay.GetURI(path)
 			log := log.WithField("url", url)
 
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, batonResponse)
+			localResponse := new(AnchorGetHeaderResponse)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, localResponse)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
@@ -482,38 +482,38 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			}
 
 			// Skip if payload is empty
-			if batonResponse.IsEmpty() {
+			if localResponse.IsEmpty() {
 				log.Warn("baton responded with empty header block")
 				return
 			}
 
-			hasToB := batonResponse.ExecHeaders.ToBHash != nil
-			if hasToB && *batonResponse.ExecHeaders.ToBHash.Header == nilHash2 {
+			hasToB := localResponse.ExecHeaders.ToBHash != nil
+			if hasToB && *localResponse.ExecHeaders.ToBHash.Header == nilHash2 {
 				log.Warn("baton responded with empty tob block hash")
 				return
 			}
 
 			var tobValue uint64
 			if hasToB {
-				tobValue = batonResponse.ExecHeaders.ToBHash.Value.Uint64()
+				tobValue = localResponse.ExecHeaders.ToBHash.Value.Uint64()
 			}
 
 			var robValues string
-			for chainID, robChunk := range batonResponse.ExecHeaders.RoBHashes {
+			for chainID, robChunk := range localResponse.ExecHeaders.RoBHashes {
 				robValues = robValues + "[" + chainID + ":" + robChunk.Value.String() + "], "
 			}
 
 			log = log.WithFields(logrus.Fields{
-				"slot":       batonResponse.BlockInfo.Slot,
+				"slot":       localResponse.BlockInfo.Slot,
 				"tob_value":  tobValue,
 				"rob_values": robValues,
 			})
 
 			// TODO: Add proposer pub key to Baton responses
 			relayPubKey := relay.PublicKey
-			reqPubKey := batonResponse.BlockInfo.ProposerPubkey.Bytes()
+			reqPubKey := localResponse.BlockInfo.ProposerPubkey.Bytes()
 			if relayPubKey != reqPubKey {
-				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), batonResponse.BlockInfo.ProposerPubkey.String())
+				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), localResponse.BlockInfo.ProposerPubkey.String())
 				return
 			}
 
@@ -525,7 +525,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 					return
 				}
 
-				ok, err := VerifyHeaderSignature(batonResponse, *relayBlsPubKey)
+				ok, err := VerifyHeaderSignature(localResponse, *relayBlsPubKey)
 				if err != nil {
 					log.WithError(err).Error("error verifying relay signature")
 					return
@@ -538,16 +538,16 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 
 			// filter out invalid chunks
 			relayMinBid := m.relayMinBid.BigInt()
-			if hasToB && !VerifyHeader(batonResponse.ExecHeaders.ToBHash, relayMinBid, log) {
-				batonResponse.ExecHeaders.ToBHash = nil
+			if hasToB && !VerifyHeader(localResponse.ExecHeaders.ToBHash, relayMinBid, log) {
+				localResponse.ExecHeaders.ToBHash = nil
 				hasToB = false
 				log.Info("filtering out tob block")
 				chunksNotGood.Store(true)
 			}
 
-			for chainID, robChunk := range batonResponse.ExecHeaders.RoBHashes {
+			for chainID, robChunk := range localResponse.ExecHeaders.RoBHashes {
 				if !VerifyHeader(robChunk, relayMinBid, log) {
-					delete(batonResponse.ExecHeaders.RoBHashes, chainID)
+					delete(localResponse.ExecHeaders.RoBHashes, chainID)
 					log.Info("filtering out rob block for chain id: ", chainID)
 					chunksNotGood.Store(true)
 				}
@@ -556,10 +556,12 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			mu.Lock()
 			defer mu.Unlock()
 
-			if batonResponse.ExecHeaders.ToBHash != nil {
-				relays[BlockHashHex(batonResponse.ExecHeaders.ToBHash.BlockHash)] = append(relays[BlockHashHex(batonResponse.ExecHeaders.ToBHash.BlockHash)], relay)
+			if localResponse.ExecHeaders.ToBHash != nil {
+				relays[BlockHashHex(localResponse.ExecHeaders.ToBHash.BlockHash)] = append(relays[BlockHashHex(localResponse.ExecHeaders.ToBHash.BlockHash)], relay)
 			}
 
+			// make local response visible to main handler thread
+			batonResponse = localResponse
 			responseIsGood.Store(true)
 		}(relay)
 
@@ -741,9 +743,9 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	m.bidsLock.Lock()
 	originalBid := m.bids[bidKey]
 	m.bidsLock.Unlock()
-	if originalBid.bidInfo.IsEmpty() {
+	if originalBid.bidInfo == nil || originalBid.bidInfo.IsEmpty() {
 		log.Error("no bid for this getPayload payload found, was getHeader called before?")
-	} else if len(originalBid.relays) == 0 {
+	} else if originalBid.relays == nil || len(originalBid.relays) == 0 {
 		log.Warn("bid found but no associated relays")
 	}
 

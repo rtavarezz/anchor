@@ -249,9 +249,13 @@ func NewExecPayloadsInfo() *ExecHeadersInfo {
 type AnchorGetHeaderResponse struct {
 	ExecHeaders ExecHeadersInfo `json:"exec_headers"`
 	BlockInfo   AnchorBlockInfo `json:"block_info"`
-	ParentHash  common.Hash     `json:"parent_hash"`
+	ParentHash  ids.ID          `json:"parent_hash"`
 	// Exec headers signed by baton's key.
 	ExecHeadersSig []byte `json:"exec_headers_sig"`
+}
+
+func (h AnchorGetHeaderResponse) ParentHashAsStr() string {
+	return ParentHashToStr(h.ParentHash)
 }
 
 type AnchorBlockInfo struct {
@@ -424,4 +428,14 @@ func hashExecPayloads(payloads *ExecPayloadsInfo) ([32]byte, error) {
 	// Use sha256 to hash the serialized ExecHeaders data
 	hash := sha256.Sum256(payloadBytes)
 	return hash, nil
+}
+
+func StrToParentHash(hash string) ids.ID {
+	var parentHash ids.ID
+	copy(parentHash[:], hash)
+	return parentHash
+}
+
+func ParentHashToStr(parentHash ids.ID) string {
+	return string(parentHash[:])
 }
