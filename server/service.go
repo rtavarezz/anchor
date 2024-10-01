@@ -166,8 +166,9 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 		return nil, err
 	}
 
-	var seqCli *seq.SeqClient
-	if !opts.MockMode {
+	// only enable this at mock mode, seq isn't a dependecy of Anchor
+	var seqCli *seq.SeqClient = nil
+	if opts.MockMode {
 		seqCli, err = seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
 		if err != nil {
 			return nil, err
@@ -416,7 +417,13 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	if len(pubkey) != 98 {
+	pkBytes, err := hex.DecodeString(pubkey)
+	if err != nil {
+		m.respondError(w, http.StatusBadRequest, errInvalidPubkey.Error())
+		return
+	}
+
+	if len(pkBytes) != 98 {
 		m.respondError(w, http.StatusBadRequest, errInvalidPubkey.Error())
 		return
 	}
