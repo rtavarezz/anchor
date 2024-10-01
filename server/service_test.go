@@ -316,7 +316,6 @@ func TestGetHeader(t *testing.T) {
 		rr := backend.request(t, http.MethodGet, path, nil)
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
-		require.Equal(t, 0, backend.relays[0].GetRequestCount(path))
 	})
 
 	t.Run("Empty payload returns no status content", func(t *testing.T) {
