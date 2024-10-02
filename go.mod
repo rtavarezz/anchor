@@ -1,14 +1,12 @@
 module github.com/AnomalyFi/anchor
 
-go 1.21.12
-
-toolchain go1.22.5
+go 1.23.0
 
 require (
 	github.com/AnomalyFi/hypersdk v0.9.6
 	github.com/AnomalyFi/nodekit-seq v0.9.16
 	github.com/ava-labs/avalanchego v1.11.10
-	github.com/ethereum/go-ethereum v1.13.14
+	github.com/ethereum/go-ethereum v1.13.15
 	github.com/flashbots/go-boost-utils v1.8.1
 	github.com/flashbots/go-utils v0.5.0
 	github.com/google/uuid v1.6.0
@@ -80,7 +78,7 @@ require (
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7 // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
-	github.com/supranational/blst v0.3.11 // indirect
+	github.com/supranational/blst v0.3.13 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.opentelemetry.io/otel v1.22.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.22.0 // indirect
