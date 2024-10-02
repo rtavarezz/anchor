@@ -720,7 +720,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	m.bidsLock.Unlock()
 	if originalBid.bidInfo == nil || originalBid.bidInfo.IsEmpty() {
 		log.Error("no bid for this getPayload payload found, was getHeader called before?")
-	} else if originalBid.relays == nil || len(originalBid.relays) == 0 {
+	} else if len(originalBid.relays) == 0 {
 		log.Warn("bid found but no associated relays")
 	}
 
