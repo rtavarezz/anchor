@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/avalanchego/ids"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
 
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
@@ -325,8 +326,16 @@ func TestGetHeader(t *testing.T) {
 		pk, err := bls.PublicKeyFromSecretKey(sk)
 		require.NoError(t, err)
 		pkBytes := pk.Bytes()
-		pkStr := hex.EncodeToString(pkBytes[:])
+		pkStr := hexutil.Encode(pkBytes[:])
 		fmt.Printf("pkStr: %s\n", pkStr)
+	})
+
+	t.Run("convert bls pubkey", func(t *testing.T) {
+		pkHex := "b20ab07ea5cf8b77ab50f2071a6f1d2aab693c8bd89761430cd29de9fa0dbae83a32c7697d59ff1b06995b1596c16fa6"
+		pkBytes, err := hex.DecodeString(pkHex)
+		require.NoError(t, err)
+		_, err = bls.PublicKeyFromBytes(pkBytes)
+		require.NoError(t, err)
 	})
 
 	t.Run("Okay response from relay with both tob and rob", func(t *testing.T) {
@@ -508,7 +517,8 @@ func TestGetHeader(t *testing.T) {
 
 		// Simulate a different public key than the relays
 		pk := bls.PublicKey{}
-		resp.BlockInfo.ProposerPubkey = pk
+		pkBytes := pk.Bytes()
+		resp.BlockInfo.ProposerPubkey = pkBytes[:]
 
 		backend.relays[0].GetHeaderResponse = resp
 		rr := backend.request(t, http.MethodGet, path, nil)

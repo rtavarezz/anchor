@@ -234,11 +234,11 @@ func (msg *AnchorGetHeaderResponse) IsEmpty() bool {
 	return msg.ExecHeaders.ToBHash == nil && len(msg.ExecHeaders.RoBHashes) == 0
 }
 
-type ExecHeadersInfo struct {
-	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
-	ToBHash   *AnchorHeader            `json:"tobhash"`
-	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
-}
+// type ExecHeadersInfo struct {
+// 	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
+// 	ToBHash   *AnchorHeader            `json:"tobhash"`
+// 	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
+// }
 
 func NewExecPayloadsInfo() *ExecHeadersInfo {
 	return &ExecHeadersInfo{
@@ -249,17 +249,47 @@ func NewExecPayloadsInfo() *ExecHeadersInfo {
 type AnchorGetHeaderResponse struct {
 	ExecHeaders ExecHeadersInfo `json:"exec_headers"`
 	BlockInfo   AnchorBlockInfo `json:"block_info"`
-	ParentHash  common.Hash     `json:"parent_hash"`
+	ParentHash  ids.ID          `json:"parent_hash"`
 	// Exec headers signed by baton's key.
 	ExecHeadersSig []byte `json:"exec_headers_sig"`
+}
+
+func (h AnchorGetHeaderResponse) MarshalBinary() ([]byte, error) {
+	return json.Marshal(h)
+}
+
+func (h *AnchorGetHeaderResponse) UnmarshalBinary(data []byte) error {
+	return json.Unmarshal(data, h)
 }
 
 type AnchorBlockInfo struct {
 	Slot uint64 `json:"slot"`
 	// nodeID of chunk producing validator.
-	Producer       ids.NodeID    `json:"producer"`
-	ProposerPubkey bls.PublicKey `json:"proposer_pubkey"`
+	Producer       ids.NodeID `json:"producer"`
+	ProposerPubkey []byte     `json:"proposer_pubkey"`
 }
+
+// SEQ validator should sign this
+type ExecHeadersInfo struct {
+	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
+	ToBHash   *AnchorHeader            `json:"tobhash"`
+	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
+}
+
+// type AnchorGetHeaderResponse struct {
+// 	ExecHeaders ExecHeadersInfo `json:"exec_headers"`
+// 	BlockInfo   AnchorBlockInfo `json:"block_info"`
+// 	ParentHash  ids.ID          `json:"parent_hash"`
+// 	// Exec headers signed by baton's key.
+// 	ExecHeadersSig []byte `json:"exec_headers_sig"`
+// }
+
+// type AnchorBlockInfo struct {
+// 	Slot uint64 `json:"slot"`
+// 	// nodeID of chunk producing validator.
+// 	Producer       ids.NodeID    `json:"producer"`
+// 	ProposerPubkey bls.PublicKey `json:"proposer_pubkey"`
+// }
 
 type AnchorGetPayloadRequest struct {
 	Slot           uint64 `json:"slot"`

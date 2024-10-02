@@ -14,4 +14,5 @@ services:
       - "-mainnet"
     environment:
       - "LOG_LEVEL=debug"
+      - "BOOST_LISTEN_ADDR=0.0.0.0:18550"
       - "RELAYS=$RELAYS" # scheme://pubkey@host,scheme://pb2@host2, e.g. http://0xtest@baton.url:8080,...

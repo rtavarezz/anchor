@@ -4,10 +4,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/flashbots/go-boost-utils/types"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/flashbots/go-boost-utils/types"
 
 	"github.com/AnomalyFi/anchor/common"
 	"github.com/AnomalyFi/anchor/config"

@@ -417,13 +417,13 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	pkBytes, err := hex.DecodeString(pubkey)
+	pkBytes, err := hexutil.Decode(pubkey)
 	if err != nil {
-		m.respondError(w, http.StatusBadRequest, errInvalidPubkey.Error())
+		m.respondError(w, http.StatusBadRequest, fmt.Sprintf("unable to decode pubkey as hex: %s", err))
 		return
 	}
 
-	if len(pkBytes) != 98 {
+	if len(pkBytes) != 48 {
 		m.respondError(w, http.StatusBadRequest, errInvalidPubkey.Error())
 		return
 	}
@@ -515,14 +515,15 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 				"rob_values": robValues,
 			})
 
+			// TODO(added by chan): this following won't work as proposerPubkey belongs to SEQ
 			// TODO: Add proposer pub key to Baton responses
-			relayPubKey := relay.PublicKey
-			reqPubKey := batonResponse.BlockInfo.ProposerPubkey.Bytes()
-			if relayPubKey != reqPubKey {
-				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), batonResponse.BlockInfo.ProposerPubkey.String())
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
+			// relayPubKey := relay.PublicKey
+			// reqPubKey := batonResponse.BlockInfo.ProposerPubkey.Bytes()
+			// if relayPubKey != reqPubKey {
+			// 	log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), batonResponse.BlockInfo.ProposerPubkey.String())
+			// 	w.WriteHeader(http.StatusBadRequest)
+			// 	return
+			// }
 
 			// The below checks that the message came from Baton by verifying message signature against Baton's public key.
 			if !config.SkipRelaySignatureCheck {
