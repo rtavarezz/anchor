@@ -50,13 +50,10 @@ var (
 )
 
 var (
-	data string
-)
-
-var (
 	nilHash     = phase0.Hash32{}
 	nilHash2    = common.Hash{}
 	nilResponse = struct{}{}
+	data        string
 )
 
 type httpErrorResp struct {
@@ -395,7 +392,6 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	//
 	if len(parentHash) > 66 {
 		m.respondError(w, http.StatusBadRequest, errInvalidHash.Error())
 		return
