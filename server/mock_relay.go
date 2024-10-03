@@ -140,14 +140,20 @@ func (m *mockRelay) GetRequestCount(path string) int {
 func (m *mockRelay) handleRoot(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{}`)
+	_, err := fmt.Fprintf(w, `{}`)
+	if err != nil {
+		panic(err)
+	}
 }
 
 // By default, handleStatus returns the relay's status as http.StatusOK
 func (m *mockRelay) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{}`)
+	_, err := fmt.Fprintf(w, `{}`)
+	if err != nil {
+		panic(err)
+	}
 }
 
 // By default, handleRegisterValidator returns a default builderApiV1.SignedValidatorRegistration

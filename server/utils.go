@@ -86,7 +86,9 @@ func SendHTTPRequest(
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusNoContent {
 		return resp.StatusCode, nil

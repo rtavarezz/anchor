@@ -126,7 +126,8 @@ func TestWebserver(t *testing.T) {
 			require.NoError(t, err)
 		}()
 		time.Sleep(time.Millisecond * 100)
-		backend.boost.srv.Close()
+		err := backend.boost.srv.Close()
+		require.NoError(t, err)
 	})
 }
 
@@ -154,7 +155,8 @@ func TestWebserverMaxHeaderSize(t *testing.T) {
 	code, err := SendHTTPRequest(context.Background(), *http.DefaultClient, http.MethodGet, path, "test", nil, nil, nil)
 	require.Error(t, err)
 	require.Equal(t, http.StatusRequestHeaderFieldsTooLarge, code)
-	backend.boost.srv.Close()
+	err = backend.boost.srv.Close()
+	require.NoError(t, err)
 }
 
 func TestStatus(t *testing.T) {

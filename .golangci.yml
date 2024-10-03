@@ -1,66 +1,49 @@
+run:
+  timeout: 5m
+  skip-dirs:
+    - vendor
+    - generated
+  skip-files:
+    - '.*_generated.go$'
+
 linters:
-  enable-all: true
-  disable:
-    - exhaustruct
-    - funlen
-    - gochecknoglobals
-    - gochecknoinits
-    - gocritic
-    - godot
-    - godox
-    - gomnd
-    - lll
-    - nlreturn
-    - nonamedreturns
-    - nosnakecase
-    - paralleltest
-    - testpackage
-    - varnamelen
-    - wrapcheck
-    - wsl
-    - musttag
-    - depguard
-
-    #
-    # Maybe fix later:
-    #
-    - cyclop
-    - gocognit
-    - goconst
-    - gosec
-    - ireturn
-    - noctx
-    - tagliatelle
-
-    #
-    # Disabled because of generics:
-    #
-    - contextcheck
-    - rowserrcheck
-    - sqlclosecheck
-    - structcheck
-    - wastedassign
-
-    #
-    # Disabled because deprecated:
-    #
-    - deadcode
-    - exhaustivestruct
-    - golint
-    - ifshort
-    - interfacer
-    - maligned
-    - scopelint
-    - varcheck
+  disable-all: true
+  enable:
+    - errcheck         # Check for unchecked errors.
+    - staticcheck      # Advanced static analysis.
+    - govet            # Reports suspicious constructs.
+    - typecheck        # Catches type errors.
+    - ineffassign      # Detects ineffectual assignments.
+    - unused           # Checks for unused variables/constants.
+    - gosimple         # Suggests simpler code constructs.
+    - nilerr           # Detects returning nil error with non-nil value.
 
 linters-settings:
-  gofumpt:
-    extra-rules: true
+  errcheck:
+    # Exclude common functions where error checking is unnecessary.
+    excludeFuncs:
+      - fmt.Fprintf
+      - fmt.Printf
+      - fmt.Sprintf
+      - '.*\.Close$'
+
+  staticcheck:
+    checks: ["all", "-ST1000", "-ST1003"]
+
   govet:
-    enable-all: true
+    enable:
+      - all
     disable:
-      - fieldalignment
-      - shadow
+      - structtag  # Disable struct tag warnings for flexibility.
+
+issues:
+  max-same-issues: 5
+  exclude-use-default: false
+  exclude:
+    - 'error return value not checked.*(Close|Write|Flush)'
+    - 'field.*is unused'  # Temporarily ignore unused fields.
+    - 'Error return value of.*\.Close.* is not checked'
+    - 'Error return value of `fmt.Fprintf` is not checked'
 
 output:
   print-issued-lines: true

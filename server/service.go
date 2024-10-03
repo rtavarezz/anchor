@@ -515,7 +515,6 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			relayMinBid := m.relayMinBid.BigInt()
 			if hasToB && !VerifyHeader(localResponse.ExecHeaders.ToBHash, relayMinBid, log) {
 				localResponse.ExecHeaders.ToBHash = nil
-				hasToB = false
 				log.Info("filtering out tob block")
 				chunksNotGood.Store(true)
 			}
