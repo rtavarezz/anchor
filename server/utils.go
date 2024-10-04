@@ -6,7 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	builderApi "github.com/attestantio/go-builder-client/api"
+	"github.com/attestantio/go-eth2-client/spec"
+	core "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/flashbots/go-boost-utils/bls"
+	"golang.org/x/exp/rand"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -14,15 +21,10 @@ import (
 	"time"
 
 	"github.com/AnomalyFi/anchor/config"
-	builderApi "github.com/attestantio/go-builder-client/api"
-	builderSpec "github.com/attestantio/go-builder-client/spec"
-	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/ssz"
-	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 )
 
@@ -44,7 +46,15 @@ type UserAgent string
 type BlockHashHex string
 
 // SendHTTPRequest - prepare and send HTTP request, marshaling the payload if any, and decoding the response if dst is set
-func SendHTTPRequest(ctx context.Context, client http.Client, method, url string, userAgent UserAgent, headers map[string]string, payload, dst any) (code int, err error) {
+func SendHTTPRequest(
+	ctx context.Context,
+	client http.Client,
+	method,
+	url string,
+	userAgent UserAgent,
+	headers map[string]string,
+	payload,
+	dst any) (code int, err error) {
 	var req *http.Request
 
 	if payload == nil {
@@ -64,7 +74,7 @@ func SendHTTPRequest(ctx context.Context, client http.Client, method, url string
 	}
 
 	// Set user agent header
-	req.Header.Set("User-Agent", strings.TrimSpace(fmt.Sprintf("mev-boost/%s %s", config.Version, userAgent)))
+	req.Header.Set("User-Agent", strings.TrimSpace(fmt.Sprintf("anchor/%s %s", config.Version, userAgent)))
 
 	// Set other headers
 	for key, value := range headers {
@@ -76,7 +86,9 @@ func SendHTTPRequest(ctx context.Context, client http.Client, method, url string
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusNoContent {
 		return resp.StatusCode, nil
@@ -105,7 +117,18 @@ func SendHTTPRequest(ctx context.Context, client http.Client, method, url string
 }
 
 // SendHTTPRequestWithRetries - prepare and send HTTP request, retrying the request if within the client timeout
-func SendHTTPRequestWithRetries(ctx context.Context, client http.Client, method, url string, userAgent UserAgent, headers map[string]string, payload, dst any, maxRetries int, log *logrus.Entry) (code int, err error) {
+func SendHTTPRequestWithRetries(
+	ctx context.Context,
+	client http.Client,
+	method,
+	url string,
+	userAgent UserAgent,
+	headers map[string]string,
+	payload,
+	dst any,
+	maxRetries int,
+	log *logrus.Entry,
+) (code int, err error) {
 	var requestCtx context.Context
 	var cancel context.CancelFunc
 	if client.Timeout > 0 {
@@ -165,18 +188,9 @@ func GetURI(url *url.URL, path string) string {
 
 // bidResp are entries in the bids cache
 type bidResp struct {
-	t        time.Time
-	response builderSpec.VersionedSignedBuilderBid
-	bidInfo  bidInfo
-	relays   []RelayEntry
-}
-
-// opBidResp are entries in the bids cache for OP
-type opBidResp struct {
-	t        time.Time
-	response OPBid
-	bidInfo  bidInfo
-	relays   []RelayEntry
+	t       time.Time
+	bidInfo *AnchorGetHeaderResponse
+	relays  []RelayEntry
 }
 
 // bidRespKey is used as key for the bids cache
@@ -185,6 +199,8 @@ type bidRespKey struct {
 	blockHash string
 }
 
+// Use the below when we have multiple baton instances
+/*
 // bidInfo is used to store bid response fields for logging and validation
 type bidInfo struct {
 	blockHash   phase0.Hash32
@@ -194,6 +210,7 @@ type bidInfo struct {
 	txRoot      phase0.Root
 	value       *uint256.Int
 }
+*/
 
 func httpClientDisallowRedirects(_ *http.Request, _ []*http.Request) error {
 	return http.ErrUseLastResponse
@@ -205,60 +222,6 @@ func weiBigIntToEthBigFloat(wei *big.Int) (ethValue *big.Float) {
 	fbalance.SetString(wei.String())
 	ethValue = new(big.Float).Quo(fbalance, big.NewFloat(1e18))
 	return
-}
-
-func parseBidInfo(bid *builderSpec.VersionedSignedBuilderBid) (bidInfo, error) {
-	blockHash, err := bid.BlockHash()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	parentHash, err := bid.ParentHash()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	pubkey, err := bid.Builder()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	blockNumber, err := bid.BlockNumber()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	txRoot, err := bid.TransactionsRoot()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	value, err := bid.Value()
-	if err != nil {
-		return bidInfo{}, err
-	}
-	bidInfo := bidInfo{
-		blockHash:   blockHash,
-		parentHash:  parentHash,
-		pubkey:      pubkey,
-		blockNumber: blockNumber,
-		txRoot:      txRoot,
-		value:       value,
-	}
-	return bidInfo, nil
-}
-
-func checkRelaySignature(bid *builderSpec.VersionedSignedBuilderBid, domain phase0.Domain, pubKey phase0.BLSPubKey) (bool, error) {
-	root, err := bid.MessageHashTreeRoot()
-	if err != nil {
-		return false, err
-	}
-	sig, err := bid.Signature()
-	if err != nil {
-		return false, err
-	}
-	signingData := phase0.SigningData{ObjectRoot: root, Domain: domain}
-	msg, err := signingData.HashTreeRoot()
-	if err != nil {
-		return false, err
-	}
-
-	return bls.VerifySignatureBytes(msg[:], sig[:], pubKey[:])
 }
 
 func getPayloadResponseIsEmpty(payload *builderApi.VersionedSubmitBlindedBlockResponse) bool {
@@ -278,3 +241,107 @@ func getPayloadResponseIsEmpty(payload *builderApi.VersionedSubmitBlindedBlockRe
 	}
 	return false
 }
+
+func CreateTransaction(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) *core.Transaction {
+	toAddress := common.HexToAddress(TestAddressValue)
+	_, err := crypto.HexToECDSA(TestPrivateKeyValue)
+	if err != nil {
+		log.Fatalf("Failed to load private key: %v", err)
+	}
+
+	tx := core.NewTx(&core.LegacyTx{
+		Nonce:    nonce,
+		To:       &toAddress,
+		Value:    &value,
+		Gas:      gasLimit,
+		GasPrice: &gasPrice,
+		Data:     []byte(data),
+	})
+
+	return tx
+}
+
+// CreateTransactionAsTxBytes makes txs into byte form and signs txs
+func CreateTransactionAsTxBytes(nonce uint64, value big.Int, gasLimit uint64, gasPrice big.Int, data string) hexutil.Bytes {
+	privateKey, err := crypto.HexToECDSA(TestPrivateKeyValue)
+	if err != nil {
+		log.Fatalf("Failed to load private key: %v", err)
+	}
+
+	tx := CreateTransaction(nonce, value, gasLimit, gasPrice, data)
+
+	chainID := big.NewInt(3) // Ropsten
+	signedTx, err := core.SignTx(tx, core.NewEIP155Signer(chainID), privateKey)
+	if err != nil {
+		log.Fatalf("Failed to sign transaction: %v", err)
+	}
+
+	rawTxBytes, err := signedTx.MarshalBinary()
+	if err != nil {
+		log.Fatalf("Failed to serialize transaction: %v", err)
+	}
+
+	return rawTxBytes
+}
+
+func CreateRandomTransaction(nonce uint64) hexutil.Bytes {
+	value := big.NewInt(int64(rand.Intn(101)))
+	gasLimit := rand.Intn(101)
+	gasPrice := big.NewInt(int64(rand.Intn(101)))
+	call := CreateTransactionAsTxBytes(nonce, *value, uint64(gasLimit), *gasPrice, data)
+	return call
+}
+
+func CreateRandomTransactions(nonce uint64, numTxs uint64) []hexutil.Bytes {
+	var list []hexutil.Bytes
+	for i := 0; i < int(numTxs); i = i + 1 {
+		tx := CreateRandomTransaction(nonce + uint64(i))
+		list = append(list, tx)
+	}
+	return list
+}
+
+func PopulateRandomHash32() common.Hash {
+	var data [32]byte
+	_, err := rand.Read(data[:])
+	if err != nil {
+		log.Fatalf("Failed to generate random data: %v", err)
+	}
+	return data
+}
+
+// VerifyHeader verifies that a given header is good
+func VerifyHeader(header *AnchorHeader, relayMinBid *big.Int, log *logrus.Entry) bool {
+	if header.Header == nil {
+		log.Info("header due to nil header")
+		return false
+	}
+
+	if header.BlockHash == "" {
+		log.Infof("header [%s] due to empty block hash", header.Header.String())
+		return false
+	}
+
+	if header.Value == nil || header.Value.Uint64() == 0 {
+		log.Infof("header [%s] due to zero or missing value", header.Header.String())
+		return false
+	}
+
+	// Skip if value (fee) is lower than the minimum bid
+	if header.Value.Cmp(relayMinBid) == -1 {
+		log.Infof("header [%s] ignoring bid below min-bid value", header.Header.String())
+		return false
+	}
+
+	return true
+}
+
+func SignMsg(msg []byte, secretKey *bls.SecretKey) *bls.Signature {
+	return bls.Sign(secretKey, msg)
+}
+
+/*
+func VerifySignature(msg []byte, publicKey *bls.PublicKey, signature *bls.Signature) (bool, error) {
+	return bls.VerifySignature(signature, publicKey, msg)
+}
+*/

@@ -9,9 +9,6 @@ import (
 	_ "github.com/flashbots/go-boost-utils/utils"
 )
 
-// The point-at-infinity is 48 zero bytes.
-var pointAtInfinityPubkey = [48]byte{}
-
 // RelayEntry represents a relay that mev-boost connects to.
 type RelayEntry struct {
 	PublicKey phase0.BLSPubKey

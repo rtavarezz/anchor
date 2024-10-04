@@ -1,9 +1,8 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,30 +15,25 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	seqconsts "github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/ava-labs/avalanchego/ids"
+	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/hypersdk/chain"
 	"github.com/AnomalyFi/hypersdk/crypto/ed25519"
-	"github.com/AnomalyFi/hypersdk/rpc"
-	"github.com/AnomalyFi/hypersdk/utils"
-	"github.com/AnomalyFi/nodekit-seq/actions"
-	"github.com/AnomalyFi/nodekit-seq/auth"
-	"github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
-	boostUtils "github.com/flashbots/go-boost-utils/utils"
-
 	"github.com/AnomalyFi/anchor/config"
-	builderApi "github.com/attestantio/go-builder-client/api"
+	"github.com/AnomalyFi/anchor/seq"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	eth2ApiV1Bellatrix "github.com/attestantio/go-eth2-client/api/v1/bellatrix"
-	eth2ApiV1Capella "github.com/attestantio/go-eth2-client/api/v1/capella"
-	eth2ApiV1Deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	fbls "github.com/flashbots/go-boost-utils/bls"
 	"github.com/flashbots/go-boost-utils/ssz"
-	"github.com/flashbots/go-boost-utils/types"
+	flash "github.com/flashbots/go-boost-utils/types"
 	"github.com/flashbots/go-utils/httplogger"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -57,7 +51,9 @@ var (
 
 var (
 	nilHash     = phase0.Hash32{}
+	nilHash2    = common.Hash{}
 	nilResponse = struct{}{}
+	data        string
 )
 
 type httpErrorResp struct {
@@ -76,8 +72,8 @@ type slotUID struct {
 	uid  uuid.UUID
 }
 
-// BoostServiceOpts provides all available options for use with NewBoostService
-type BoostServiceOpts struct {
+// AnchorServiceOpts provides all available options for use with NewAnchorService
+type AnchorServiceOpts struct {
 	Log                   *logrus.Entry
 	ListenAddr            string
 	Relays                []RelayEntry
@@ -85,23 +81,25 @@ type BoostServiceOpts struct {
 	GenesisForkVersionHex string
 	GenesisTime           uint64
 	RelayCheck            bool
-	RelayMinBid           types.U256Str
+	RelayMinBid           flash.U256Str
 
 	RequestTimeoutGetHeader  time.Duration
 	RequestTimeoutGetPayload time.Duration
 	RequestTimeoutRegVal     time.Duration
 	RequestMaxRetries        int
+
+	MockMode bool
 }
 
-// BoostService - the mev-boost service
-type BoostService struct {
+// AnchorService - the mev-boost service
+type AnchorService struct {
 	listenAddr    string
 	relays        []RelayEntry
 	relayMonitors []*url.URL
 	log           *logrus.Entry
 	srv           *http.Server
 	relayCheck    bool
-	relayMinBid   types.U256Str
+	relayMinBid   flash.U256Str
 	genesisTime   uint64
 
 	builderSigningDomain   phase0.Domain
@@ -111,17 +109,28 @@ type BoostService struct {
 	httpClientRegVal       http.Client
 	requestMaxRetries      int
 
-	bids     map[bidRespKey]bidResp   // keeping track of bids, to log the originating relay on withholding
-	opBids   map[bidRespKey]opBidResp // keeping track of bids, to log the originating relay on withholding
+	bids     map[bidRespKey]bidResp // keeping track of bids, to log the originating relay on withholding
 	bidsLock sync.Mutex
 
 	slotUID     *slotUID
 	slotUIDLock sync.Mutex
+
+	// Below used only for testing
+	mockMode bool
+
+	// SEQ client
+	// not created when mock mode enabled
+	seqCli *seq.SeqClient
 }
 
-// NewBoostService created a new BoostService
-func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
-	if len(opts.Relays) == 0 {
+// go program calls this on boot up automatically
+func init() {
+	rand.Seed(uint64(time.Now().UnixNano()))
+}
+
+// NewAnchorService created a new AnchorService
+func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
+	if !opts.MockMode && len(opts.Relays) == 0 {
 		return nil, errNoRelays
 	}
 
@@ -130,7 +139,25 @@ func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
 		return nil, err
 	}
 
-	return &BoostService{
+	seqSiginingKeyBytes, err := hex.DecodeString(config.SeqSigningKey)
+	if err != nil {
+		return nil, err
+	}
+	seqSigningKey := ed25519.PrivateKey(seqSiginingKeyBytes)
+	seqChainID, err := ids.FromString(config.SeqChainID)
+	if err != nil {
+		return nil, err
+	}
+
+	var seqCli *seq.SeqClient
+	if !opts.MockMode {
+		seqCli, err = seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &AnchorService{
 		listenAddr:    opts.ListenAddr,
 		relays:        opts.Relays,
 		relayMonitors: opts.RelayMonitors,
@@ -159,10 +186,13 @@ func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
 			CheckRedirect: httpClientDisallowRedirects,
 		},
 		requestMaxRetries: opts.RequestMaxRetries,
+		mockMode:          opts.MockMode,
+
+		seqCli: seqCli,
 	}, nil
 }
 
-func (m *BoostService) respondError(w http.ResponseWriter, code int, message string) {
+func (m *AnchorService) respondError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	resp := httpErrorResp{code, message}
@@ -172,7 +202,8 @@ func (m *BoostService) respondError(w http.ResponseWriter, code int, message str
 	}
 }
 
-func (m *BoostService) respondOK(w http.ResponseWriter, response any) {
+// note
+func (m *AnchorService) respondOK(w http.ResponseWriter, response any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -181,15 +212,19 @@ func (m *BoostService) respondOK(w http.ResponseWriter, response any) {
 	}
 }
 
-func (m *BoostService) getRouter() http.Handler {
+func (m *AnchorService) getRouter() http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/", m.handleRoot)
 
 	r.HandleFunc(pathStatus, m.handleStatus).Methods(http.MethodGet)
 	r.HandleFunc(pathRegisterValidator, m.handleRegisterValidator).Methods(http.MethodPost)
+
 	r.HandleFunc(pathGetHeader, m.handleGetHeader).Methods(http.MethodGet)
 	r.HandleFunc(pathGetPayload, m.handleGetPayload).Methods(http.MethodPost)
-	r.HandleFunc(pathGetOPPayload, m.handleOPGetPayload).Methods(http.MethodGet)
+
+	// These are mock handlers for the SEQ-Anchor interface. This will be stubbed in for now.
+	//r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
+	//r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
 
 	r.Use(mux.CORSMethodMiddleware(r))
 	loggedRouter := httplogger.LoggingMiddlewareLogrus(m.log, r)
@@ -197,7 +232,7 @@ func (m *BoostService) getRouter() http.Handler {
 }
 
 // StartHTTPServer starts the HTTP server for this boost service instance
-func (m *BoostService) StartHTTPServer() error {
+func (m *AnchorService) StartHTTPServer() error {
 	if m.srv != nil {
 		return errServerAlreadyRunning
 	}
@@ -223,7 +258,7 @@ func (m *BoostService) StartHTTPServer() error {
 	return err
 }
 
-func (m *BoostService) startBidCacheCleanupTask() {
+func (m *AnchorService) startBidCacheCleanupTask() {
 	for {
 		time.Sleep(1 * time.Minute)
 		m.bidsLock.Lock()
@@ -236,7 +271,7 @@ func (m *BoostService) startBidCacheCleanupTask() {
 	}
 }
 
-func (m *BoostService) sendValidatorRegistrationsToRelayMonitors(payload []builderApiV1.SignedValidatorRegistration) {
+func (m *AnchorService) sendValidatorRegistrationsToRelayMonitors(payload []builderApiV1.SignedValidatorRegistration) {
 	log := m.log.WithField("method", "sendValidatorRegistrationsToRelayMonitors").WithField("numRegistrations", len(payload))
 	for _, relayMonitor := range m.relayMonitors {
 		go func(relayMonitor *url.URL) {
@@ -252,7 +287,7 @@ func (m *BoostService) sendValidatorRegistrationsToRelayMonitors(payload []build
 	}
 }
 
-// func (m *BoostService) sendAuctionTranscriptToRelayMonitors(transcript *AuctionTranscript) {
+// func (m *AnchorService) sendAuctionTranscriptToRelayMonitors(transcript *AuctionTranscript) {
 // 	log := m.log.WithField("method", "sendAuctionTranscriptToRelayMonitors")
 // 	for _, relayMonitor := range m.relayMonitors {
 // 		go func(relayMonitor *url.URL) {
@@ -268,13 +303,13 @@ func (m *BoostService) sendValidatorRegistrationsToRelayMonitors(payload []build
 // 	}
 // }
 
-func (m *BoostService) handleRoot(w http.ResponseWriter, _ *http.Request) {
+func (m *AnchorService) handleRoot(w http.ResponseWriter, _ *http.Request) {
 	m.respondOK(w, nilResponse)
 }
 
 // handleStatus sends calls to the status endpoint of every relay.
 // It returns OK if at least one returned OK, and returns error otherwise.
-func (m *BoostService) handleStatus(w http.ResponseWriter, _ *http.Request) {
+func (m *AnchorService) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set(HeaderKeyVersion, config.Version)
 	if !m.relayCheck || m.CheckRelays() > 0 {
 		m.respondOK(w, nilResponse)
@@ -284,7 +319,7 @@ func (m *BoostService) handleStatus(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleRegisterValidator - returns 200 if at least one relay returns 200, else 502
-func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.Request) {
+func (m *AnchorService) handleRegisterValidator(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "registerValidator")
 	log.Debug("registerValidator")
 
@@ -329,18 +364,18 @@ func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.
 	m.respondError(w, http.StatusBadGateway, errNoSuccessfulRelayResponse.Error())
 }
 
-// handleGetHeader requests bids from the relays
-func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
+// Original
+func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	slot := vars["slot"]
-	parentHashHex := vars["parent_hash"]
+	parentHash := vars["parent_hash"]
 	pubkey := vars["pubkey"]
 
 	ua := UserAgent(req.Header.Get("User-Agent"))
 	log := m.log.WithFields(logrus.Fields{
 		"method":     "getHeader",
 		"slot":       slot,
-		"parentHash": parentHashHex,
+		"parentHash": parentHash,
 		"pubkey":     pubkey,
 		"ua":         ua,
 	})
@@ -357,7 +392,7 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	if len(parentHashHex) != 66 {
+	if len(parentHash) > 66 {
 		m.respondError(w, http.StatusBadRequest, errInvalidHash.Error())
 		return
 	}
@@ -387,21 +422,26 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 	}
 
 	// Prepare relay responses
-	result := bidResp{}                           // the final response, containing the highest bid (if any)
+	batonResponse := new(AnchorGetHeaderResponse)
 	relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
+	var responseIsGood atomic.Bool
+	var chunksNotGood atomic.Bool
 
-	// Call the relays
+	// Forward the request to Baton. For now, there will be a single instance of Baton.
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, relay := range m.relays {
 		wg.Add(1)
+
+		// TODO: Since we know there is only a single Baton instance. We could probably cut out the goroutine.
 		go func(relay RelayEntry) {
 			defer wg.Done()
-			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashHex, pubkey)
+			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHash, pubkey)
 			url := relay.GetURI(path)
 			log := log.WithField("url", url)
-			responsePayload := new(builderSpec.VersionedSignedBuilderBid)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, responsePayload)
+
+			localResponse := new(AnchorGetHeaderResponse)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, localResponse)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
@@ -413,38 +453,50 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 			}
 
 			// Skip if payload is empty
-			if responsePayload.IsEmpty() {
+			if localResponse.IsEmpty() {
+				log.Warn("baton responded with empty header block")
 				return
 			}
 
-			// Getting the bid info will check if there are missing fields in the response
-			bidInfo, err := parseBidInfo(responsePayload)
-			if err != nil {
-				log.WithError(err).Warn("error parsing bid info")
+			hasToB := localResponse.ExecHeaders.ToBHash != nil
+			if hasToB && *localResponse.ExecHeaders.ToBHash.Header == nilHash2 {
+				log.Warn("baton responded with empty tob block hash")
 				return
 			}
 
-			if bidInfo.blockHash == nilHash {
-				log.Warn("relay responded with empty block hash")
-				return
+			var tobValue uint64
+			if hasToB {
+				tobValue = localResponse.ExecHeaders.ToBHash.Value.Uint64()
 			}
 
-			valueEth := weiBigIntToEthBigFloat(bidInfo.value.ToBig())
+			var robValues string
+			for chainID, robChunk := range localResponse.ExecHeaders.RoBHashes {
+				robValues = robValues + "[" + chainID + ":" + robChunk.Value.String() + "], "
+			}
+
 			log = log.WithFields(logrus.Fields{
-				"blockNumber": bidInfo.blockNumber,
-				"blockHash":   bidInfo.blockHash.String(),
-				"txRoot":      bidInfo.txRoot.String(),
-				"value":       valueEth.Text('f', 18),
+				"slot":       localResponse.BlockInfo.Slot,
+				"tob_value":  tobValue,
+				"rob_values": robValues,
 			})
 
-			if relay.PublicKey.String() != bidInfo.pubkey.String() {
-				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), bidInfo.pubkey.String())
+			// TODO: Add proposer pub key to Baton responses
+			relayPubKey := relay.PublicKey
+			reqPubKey := localResponse.BlockInfo.ProposerPubkey.Bytes()
+			if relayPubKey != reqPubKey {
+				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), localResponse.BlockInfo.ProposerPubkey.String())
 				return
 			}
 
-			// Verify the relay signature in the relay response
+			// The below checks that the message came from Baton by verifying message signature against Baton's public key.
 			if !config.SkipRelaySignatureCheck {
-				ok, err := checkRelaySignature(responsePayload, m.builderSigningDomain, relay.PublicKey)
+				relayBlsPubKey, err := fbls.PublicKeyFromBytes(relay.PublicKey[:])
+				if err != nil {
+					log.WithError(err).Error("relay public key could not be converted to bls pubkey")
+					return
+				}
+
+				ok, err := VerifyHeaderSignature(localResponse, *relayBlsPubKey)
 				if err != nil {
 					log.WithError(err).Error("error verifying relay signature")
 					return
@@ -455,260 +507,213 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 				}
 			}
 
-			// Verify response coherence with proposer's input data
-			if bidInfo.parentHash.String() != parentHashHex {
-				log.WithFields(logrus.Fields{
-					"originalParentHash": parentHashHex,
-					"responseParentHash": bidInfo.parentHash.String(),
-				}).Error("proposer and relay parent hashes are not the same")
-				return
+			// filter out invalid chunks
+			relayMinBid := m.relayMinBid.BigInt()
+			if hasToB && !VerifyHeader(localResponse.ExecHeaders.ToBHash, relayMinBid, log) {
+				localResponse.ExecHeaders.ToBHash = nil
+				log.Info("filtering out tob block")
+				chunksNotGood.Store(true)
 			}
 
-			isZeroValue := bidInfo.value.IsZero()
-			isEmptyListTxRoot := bidInfo.txRoot.String() == "0x7ffe241ea60187fdb0187bfa22de35d1f9bed7ab061d9401fd47e34a54fbede1"
-			if isZeroValue || isEmptyListTxRoot {
-				log.Warn("ignoring bid with 0 value")
-				return
-			}
-			log.Debug("bid received")
-
-			// Skip if value (fee) is lower than the minimum bid
-			if bidInfo.value.CmpBig(m.relayMinBid.BigInt()) == -1 {
-				log.Debug("ignoring bid below min-bid value")
-				return
+			for chainID, robChunk := range localResponse.ExecHeaders.RoBHashes {
+				if !VerifyHeader(robChunk, relayMinBid, log) {
+					delete(localResponse.ExecHeaders.RoBHashes, chainID)
+					log.Info("filtering out rob block for chain id: ", chainID)
+					chunksNotGood.Store(true)
+				}
 			}
 
 			mu.Lock()
 			defer mu.Unlock()
 
-			// Remember which relays delivered which bids (multiple relays might deliver the top bid)
-			relays[BlockHashHex(bidInfo.blockHash.String())] = append(relays[BlockHashHex(bidInfo.blockHash.String())], relay)
-
-			// Compare the bid with already known top bid (if any)
-			if !result.response.IsEmpty() {
-				valueDiff := bidInfo.value.Cmp(result.bidInfo.value)
-				if valueDiff == -1 { // current bid is less profitable than already known one
-					return
-				} else if valueDiff == 0 { // current bid is equally profitable as already known one. Use hash as tiebreaker
-					previousBidBlockHash := result.bidInfo.blockHash
-					if bidInfo.blockHash.String() >= previousBidBlockHash.String() {
-						return
-					}
-				}
+			if localResponse.ExecHeaders.ToBHash != nil {
+				relays[BlockHashHex(localResponse.ExecHeaders.ToBHash.BlockHash)] = append(relays[BlockHashHex(localResponse.ExecHeaders.ToBHash.BlockHash)], relay)
 			}
 
-			// Use this relay's response as mev-boost response because it's most profitable
-			log.Debug("new best bid")
-			result.response = *responsePayload
-			result.bidInfo = bidInfo
-			result.t = time.Now()
+			// make local response visible to main handler thread
+			batonResponse = localResponse
+			responseIsGood.Store(true)
 		}(relay)
+
+		// only process one iteration
+		break
 	}
 
-	// Wait for all requests to complete...
+	// After waiting here, we should
 	wg.Wait()
 
-	if result.response.IsEmpty() {
-		log.Info("no bid received")
-		w.WriteHeader(http.StatusNoContent)
+	if batonResponse.IsEmpty() {
+		log.Info("no seq header response had no valid chunks")
+
+		if chunksNotGood.Load() {
+			// In this case, chunks were filtered out because they did not pass verification, and response is now empty.
+			w.WriteHeader(http.StatusBadRequest)
+		} else {
+			w.WriteHeader(http.StatusNoContent)
+		}
 		return
 	}
 
-	// Log result
-	valueEth := weiBigIntToEthBigFloat(result.bidInfo.value.ToBig())
-	result.relays = relays[BlockHashHex(result.bidInfo.blockHash.String())]
-	log.WithFields(logrus.Fields{
-		"blockHash":   result.bidInfo.blockHash.String(),
-		"blockNumber": result.bidInfo.blockNumber,
-		"txRoot":      result.bidInfo.txRoot.String(),
-		"value":       valueEth.Text('f', 18),
-		"relays":      strings.Join(RelayEntriesToStrings(result.relays), ", "),
-	}).Info("best bid")
-
+	// TODO: Verify bid key cache usage
 	// Remember the bid, for future logging in case of withholding
-	bidKey := bidRespKey{slot: _slot, blockHash: result.bidInfo.blockHash.String()}
+	bidKey := bidRespKey{slot: _slot, blockHash: batonResponse.ParentHash.String()}
 	m.bidsLock.Lock()
-	m.bids[bidKey] = result
+	bidResp := bidResp{
+		t:       time.Now(),
+		bidInfo: batonResponse,
+	}
+
+	m.bids[bidKey] = bidResp
 	m.bidsLock.Unlock()
 
 	// Return the bid
-	m.respondOK(w, &result.response)
+	m.respondOK(w, batonResponse)
 }
 
-func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, payload *eth2ApiV1Capella.SignedBlindedBeaconBlock, body []byte) {
-	if payload.Message == nil || payload.Message.Body == nil || payload.Message.Body.ExecutionPayloadHeader == nil {
-		log.WithField("body", string(body)).Error("missing parts of the request payload from the beacon-node")
-		m.respondError(w, http.StatusBadRequest, "missing parts of the payload")
+/*
+// Mock implementation
+func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Request) {
+	//TODO: everytime this function is called, we need mock chunks
+	// generate mock chunks' headers(Baton would generate headers for mock chunks) and return them back to seq
+
+	// parsing SEQHeaderRequest
+	vars := mux.Vars(req)
+
+	slot := vars["slot"]
+	_slot, err := strconv.ParseUint(slot, 10, 64)
+	fmt.Printf("slot: %s\n", slot)
+	if err != nil {
+		m.respondError(w, http.StatusBadRequest, errInvalidSlot.Error())
 		return
 	}
 
-	// Get the slotUID for this slot
-	slotUID := ""
-	m.slotUIDLock.Lock()
-	if m.slotUID.slot == uint64(payload.Message.Slot) {
-		slotUID = m.slotUID.uid.String()
-	} else {
-		log.Warnf("latest slotUID is for slot %d rather than payload slot %d", m.slotUID.slot, payload.Message.Slot)
-	}
-	m.slotUIDLock.Unlock()
-
-	// Prepare logger
-	ua := UserAgent(req.Header.Get("User-Agent"))
-	log = log.WithFields(logrus.Fields{
-		"ua":         ua,
-		"slot":       payload.Message.Slot,
-		"blockHash":  payload.Message.Body.ExecutionPayloadHeader.BlockHash.String(),
-		"parentHash": payload.Message.Body.ExecutionPayloadHeader.ParentHash.String(),
-		"slotUID":    slotUID,
-	})
-
-	// Log how late into the slot the request starts
-	slotStartTimestamp := m.genesisTime + uint64(payload.Message.Slot)*config.SlotTimeSec
-	msIntoSlot := uint64(time.Now().UTC().UnixMilli()) - slotStartTimestamp*1000
-	log.WithFields(logrus.Fields{
-		"genesisTime": m.genesisTime,
-		"slotTimeSec": config.SlotTimeSec,
-		"msIntoSlot":  msIntoSlot,
-	}).Infof("submitBlindedBlock request start - %d milliseconds into slot %d", msIntoSlot, payload.Message.Slot)
-
-	// Get the bid!
-	bidKey := bidRespKey{slot: uint64(payload.Message.Slot), blockHash: payload.Message.Body.ExecutionPayloadHeader.BlockHash.String()}
-	m.bidsLock.Lock()
-	originalBid := m.bids[bidKey]
-	m.bidsLock.Unlock()
-	if originalBid.response.IsEmpty() {
-		log.Error("no bid for this getPayload payload found. was getHeader called before?")
-	} else if len(originalBid.relays) == 0 {
-		log.Warn("bid found but no associated relays")
+	// Optional param, numToBTxs indicates the number of txs in the ToB chunk
+	numToBTxsToken, ok := vars["numtobtxs"]
+	numToBTxs := uint64(1)
+	if ok {
+		_numToBTxs, err := strconv.ParseUint(numToBTxsToken, 10, 32)
+		if err != nil {
+			m.respondError(w, http.StatusBadRequest, errInvalidToBTxs.Error())
+			return
+		}
+		numToBTxs = _numToBTxs
 	}
 
-	// send bid and signed block to relay monitor with eth2ApiV1Capella payload
-	// go m.sendAuctionTranscriptToRelayMonitors(&AuctionTranscript{Bid: originalBid.response.Data, Acceptance: payload})
-
-	// Add request headers
-	headers := map[string]string{HeaderKeySlotUID: slotUID}
-
-	// Prepare for requests
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	result := new(builderApi.VersionedSubmitBlindedBlockResponse)
-
-	// Prepare the request context, which will be cancelled after the first successful response from a relay
-	requestCtx, requestCtxCancel := context.WithCancel(context.Background())
-	defer requestCtxCancel()
-
-	for _, relay := range m.relays {
-		wg.Add(1)
-		go func(relay RelayEntry) {
-			defer wg.Done()
-			url := relay.GetURI(pathGetPayload)
-			log := log.WithField("url", url)
-			log.Debug("calling getPayload")
-
-			responsePayload := new(builderApi.VersionedSubmitBlindedBlockResponse)
-			_, err := SendHTTPRequestWithRetries(requestCtx, m.httpClientGetPayload, http.MethodPost, url, ua, headers, payload, responsePayload, m.requestMaxRetries, log)
-			if err != nil {
-				if errors.Is(requestCtx.Err(), context.Canceled) {
-					log.Info("request was cancelled") // this is expected, if payload has already been received by another relay
-				} else {
-					log.WithError(err).Error("error making request to relay")
-				}
-				return
-			}
-
-			if getPayloadResponseIsEmpty(responsePayload) {
-				log.Error("response with empty data!")
-				return
-			}
-
-			// Ensure the response blockhash matches the request
-			if payload.Message.Body.ExecutionPayloadHeader.BlockHash != responsePayload.Capella.BlockHash {
-				log.WithFields(logrus.Fields{
-					"responseBlockHash": responsePayload.Capella.BlockHash.String(),
-				}).Error("requestBlockHash does not equal responseBlockHash")
-				return
-			}
-
-			// Ensure the response blockhash matches the response block
-			calculatedBlockHash, err := boostUtils.ComputeBlockHash(&builderApi.VersionedExecutionPayload{
-				Version: responsePayload.Version,
-				Capella: responsePayload.Capella,
-			}, nil)
-			if err != nil {
-				log.WithError(err).Error("could not calculate block hash")
-			} else if responsePayload.Capella.BlockHash != calculatedBlockHash {
-				log.WithFields(logrus.Fields{
-					"calculatedBlockHash": calculatedBlockHash.String(),
-					"responseBlockHash":   responsePayload.Capella.BlockHash.String(),
-				}).Error("responseBlockHash does not equal hash calculated from response block")
-			}
-
-			// Lock before accessing the shared payload
-			mu.Lock()
-			defer mu.Unlock()
-
-			if requestCtx.Err() != nil { // request has been cancelled (or deadline exceeded)
-				return
-			}
-
-			// Received successful response. Now cancel other requests and return immediately
-			requestCtxCancel()
-			*result = *responsePayload
-			log.Info("received payload from relay")
-		}(relay)
+	// Optional param, NumRoBChains indicates the number of chunks in the RoB
+	numRoBChainsToken, ok := vars["numrobchains"]
+	numRoBChains := uint64(1)
+	if ok {
+		_numRoBChains, err := strconv.ParseUint(numRoBChainsToken, 10, 32)
+		if err != nil {
+			m.respondError(w, http.StatusBadRequest, errInvalidRoBChains.Error())
+			return
+		}
+		numRoBChains = _numRoBChains
 	}
 
-	// Wait for all requests to complete...
-	wg.Wait()
+	// Optional param, NumRoBChunkTxs indicates the number of chunk
+	numRoBChunkTxsToken, ok := vars["numrobchunktxs"]
+	numRoBChunkTxs := uint64(1)
+	if ok {
+		_numRoBChunkTxs, err := strconv.ParseUint(numRoBChunkTxsToken, 10, 32)
+		if err != nil {
+			m.respondError(w, http.StatusBadRequest, errInvalidRoBChunkTxs.Error())
+			return
+		}
+		numRoBChunkTxs = _numRoBChunkTxs
+	}
 
-	// If no payload has been received from relay, log loudly about withholding!
-	if result.Capella == nil || result.Capella.BlockHash == nilHash {
-		originRelays := RelayEntriesToStrings(originalBid.relays)
-		log.WithField("relaysWithBid", strings.Join(originRelays, ", ")).Error("no payload received from relay!")
-		m.respondError(w, http.StatusBadGateway, errNoSuccessfulRelayResponse.Error())
+	m.mockExpectedSlot = _slot
+	// populated ToB chunk of SEQ block with the 1 chunk made above
+	m.mockChunkToB = CreateRandomTransactions(m.getNextMockNonce(), numToBTxs)
+
+	// populated RoB chunks by numRoBChains(counter for how many RoB chunks are in SEQ block)
+	// and then creates random txs for those RoB chunks
+	m.mockChunkRoB = make(map[string][]hexutil.Bytes)
+	for i := 0; i < int(numRoBChains); i++ {
+		mockRoBTxs := CreateRandomTransactions(m.incrNextMockNonce(numRoBChunkTxs), numRoBChunkTxs)
+		chainID := "chain_" + strconv.Itoa(i)
+		m.mockChunkRoB[chainID] = mockRoBTxs
+	}
+
+	// sending the response to SEQ awaiting signature
+	res := NewSEQHeaderResponse(_slot)
+
+	// Note for mocking this is just a random header we send back to SEQ, and, while we expect them to sign
+	// it, we don't do any additional checking on the signature. Possibly might change in the future.
+	tobHash := PopulateRandomHash32()
+	res.ToBHash = &tobHash
+
+	// generate a random header hash  per RoB chunk
+	for k, v := range m.mockChunkRoB {
+		if len(v) == 0 {
+			log.Fatal("Zero-sized chunk ended up in RoB with key: " + k)
+		}
+
+		chunkHash := PopulateRandomHash32()
+		res.RoBHashes[k] = chunkHash
+	}
+
+	m.respondOK(w, res)
+}
+*/
+
+// original implementation
+func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
+	log := m.log.WithField("method", "getPayload")
+	log.Debug("getPayload request starts")
+
+	// Read the body first, so we can log it later on error
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		log.WithError(err).Error("could not read body of request from the validator")
+		m.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	m.respondOK(w, result)
-}
+	payloadReq := AnchorGetPayloadRequest{}
+	err = json.Unmarshal(body, &payloadReq)
+	if err != nil {
+		log.WithError(err).Error("could not read body of request in getPayload")
+		m.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
-func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, blindedBlock *eth2ApiV1Deneb.SignedBlindedBeaconBlock) {
 	// Get the currentSlotUID for this slot
 	currentSlotUID := ""
 	m.slotUIDLock.Lock()
-	if m.slotUID.slot == uint64(blindedBlock.Message.Slot) {
+	if m.slotUID.slot == payloadReq.Slot {
 		currentSlotUID = m.slotUID.uid.String()
 	} else {
-		log.Warnf("latest slotUID is for slot %d rather than payload slot %d", m.slotUID.slot, blindedBlock.Message.Slot)
+		log.Warnf("latest slotUID is for slot %d rather than payload slot %d", m.slotUID.slot, payloadReq.Slot)
 	}
 	m.slotUIDLock.Unlock()
-	//TODO new stuff here?
 
 	// Prepare logger
 	ua := UserAgent(req.Header.Get("User-Agent"))
+	slot := payloadReq.Slot
 	log = log.WithFields(logrus.Fields{
 		"ua":         ua,
-		"slot":       blindedBlock.Message.Slot,
-		"blockHash":  blindedBlock.Message.Body.ExecutionPayloadHeader.BlockHash.String(),
-		"parentHash": blindedBlock.Message.Body.ExecutionPayloadHeader.ParentHash.String(),
+		"slot":       slot,
+		"parentHash": payloadReq.ParentHash,
 		"slotUID":    currentSlotUID,
 	})
 
 	// Log how late into the slot the request starts
-	slotStartTimestamp := m.genesisTime + uint64(blindedBlock.Message.Slot)*config.SlotTimeSec
+	slotStartTimestamp := m.genesisTime + slot*config.SlotTimeSec
 	msIntoSlot := uint64(time.Now().UTC().UnixMilli()) - slotStartTimestamp*1000
 	log.WithFields(logrus.Fields{
 		"genesisTime": m.genesisTime,
 		"slotTimeSec": config.SlotTimeSec,
 		"msIntoSlot":  msIntoSlot,
-	}).Infof("submitBlindedBlock request start - %d milliseconds into slot %d", msIntoSlot, blindedBlock.Message.Slot)
+	}).Infof("submitBlindedBlock request start - %d milliseconds into slot %d", msIntoSlot, slot)
 
 	// Get the bid!
-	bidKey := bidRespKey{slot: uint64(blindedBlock.Message.Slot), blockHash: blindedBlock.Message.Body.ExecutionPayloadHeader.BlockHash.String()}
+	bidKey := bidRespKey{slot: slot, blockHash: payloadReq.ParentHash}
 	m.bidsLock.Lock()
 	originalBid := m.bids[bidKey]
 	m.bidsLock.Unlock()
-	if originalBid.response.IsEmpty() {
+	if originalBid.bidInfo == nil || originalBid.bidInfo.IsEmpty() {
 		log.Error("no bid for this getPayload payload found, was getHeader called before?")
 	} else if len(originalBid.relays) == 0 {
 		log.Warn("bid found but no associated relays")
@@ -720,22 +725,37 @@ func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Requ
 	// Prepare for requests
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	result := new(builderApi.VersionedSubmitBlindedBlockResponse)
+	var result *AnchorGetPayloadResponse
 
 	// Prepare the request context, which will be cancelled after the first successful response from a relay
 	requestCtx, requestCtxCancel := context.WithCancel(context.Background())
 	defer requestCtxCancel()
 
+	// Since there is only one Baton instance, we can stop after processing the first iteration.
+	// If ever, we have more than one Baton instance, this might have to change.
 	for _, relay := range m.relays {
 		wg.Add(1)
+
+		// TODO: Since we know there is only a single Baton instance. We could probably cut out the goroutine.
 		go func(relay RelayEntry) {
 			defer wg.Done()
 			url := relay.GetURI(pathGetPayload)
 			log := log.WithField("url", url)
 			log.Debug("calling getPayload")
 
-			responsePayload := new(builderApi.VersionedSubmitBlindedBlockResponse)
-			_, err := SendHTTPRequestWithRetries(requestCtx, m.httpClientGetPayload, http.MethodPost, url, ua, headers, blindedBlock, responsePayload, m.requestMaxRetries, log)
+			localResult := NewAnchorGetPayloadResponse(uint64(0), true)
+
+			_, err := SendHTTPRequestWithRetries(
+				requestCtx,
+				m.httpClientGetPayload,
+				http.MethodPost,
+				url,
+				ua,
+				headers,
+				payloadReq,
+				&localResult,
+				m.requestMaxRetries,
+				log)
 			if err != nil {
 				if errors.Is(requestCtx.Err(), context.Canceled) {
 					log.Info("request was cancelled") // this is expected, if payload has already been received by another relay
@@ -745,41 +765,37 @@ func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Requ
 				return
 			}
 
-			if getPayloadResponseIsEmpty(responsePayload) {
+			if localResult.IsEmpty() {
 				log.Error("response with empty data!")
 				return
 			}
 
-			payload := responsePayload.Deneb.ExecutionPayload
-			blobs := responsePayload.Deneb.BlobsBundle
+			// TODO: Do we need something like this? Then we need to add block hash to the response.
+			/*
+			   // Ensure the response blockhash matches the request
+			   if blindedBlock.Message.Body.ExecutionPayloadHeader.BlockHash != payload.BlockHash {
+			     log.WithFields(logrus.Fields{
+			       "responseBlockHash": payload.BlockHash.String(),
+			     }).Error("requestBlockHash does not equal responseBlockHash")
+			     return
+			   }
+			*/
 
-			// Ensure the response blockhash matches the request
-			if blindedBlock.Message.Body.ExecutionPayloadHeader.BlockHash != payload.BlockHash {
-				log.WithFields(logrus.Fields{
-					"responseBlockHash": payload.BlockHash.String(),
-				}).Error("requestBlockHash does not equal responseBlockHash")
-				return
-			}
+			// The below checks that the message came from Baton by verifying message signature against Baton's public key.
+			if !config.SkipRelaySignatureCheck {
+				relayBlsPubKey, err := fbls.PublicKeyFromBytes(relay.PublicKey[:])
+				if err != nil {
+					log.WithError(err).Error("relay public key could not be converted to bls pubkey")
+					return
+				}
 
-			commitments := blindedBlock.Message.Body.BlobKZGCommitments
-			// Ensure that blobs are valid and matches the request
-			if len(commitments) != len(blobs.Blobs) || len(commitments) != len(blobs.Commitments) || len(commitments) != len(blobs.Proofs) {
-				log.WithFields(logrus.Fields{
-					"requestBlobCommitments":  len(commitments),
-					"responseBlobs":           len(blobs.Blobs),
-					"responseBlobCommitments": len(blobs.Commitments),
-					"responseBlobProofs":      len(blobs.Proofs),
-				}).Error("block KZG commitment length does not equal responseBlobs length")
-				return
-			}
-
-			for i, commitment := range commitments {
-				if commitment != blobs.Commitments[i] {
-					log.WithFields(logrus.Fields{
-						"requestBlobCommitment":  commitment.String(),
-						"responseBlobCommitment": blobs.Commitments[i].String(),
-						"index":                  i,
-					}).Error("requestBlobCommitment does not equal responseBlobCommitment")
+				ok, err := VerifyPayloadSignature(&localResult, *relayBlsPubKey)
+				if err != nil {
+					log.WithError(err).Error("error verifying relay signature")
+					return
+				}
+				if !ok {
+					log.Error("failed to verify relay signature")
 					return
 				}
 			}
@@ -794,18 +810,21 @@ func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Requ
 
 			// Received successful response. Now cancel other requests and return immediately
 			requestCtxCancel()
-			*result = *responsePayload
+			result = &localResult
 			log.Info("received payload from relay")
 		}(relay)
+
+		// process only first relay instance
+		break
 	}
 
 	// Wait for all requests to complete...
 	wg.Wait()
 
 	// If no payload has been received from relay, log loudly about withholding!
-	if getPayloadResponseIsEmpty(result) {
+	if result == nil || result.IsEmpty() {
 		originRelays := RelayEntriesToStrings(originalBid.relays)
-		log.WithField("relaysWithBid", strings.Join(originRelays, ", ")).Error("no payload received from relay!")
+		log.WithField("relaysWithBid", strings.Join(originRelays, ", ")).Error("no payload received from baton!")
 		m.respondError(w, http.StatusBadGateway, errNoSuccessfulRelayResponse.Error())
 		return
 	}
@@ -813,7 +832,10 @@ func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Requ
 	m.respondOK(w, result)
 }
 
-func (m *BoostService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
+/*
+// Mock custom handler. Note this is a true mock. It does no checking of the info
+// received from SEQ and just sends the payload back.
+func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getPayload")
 	log.Debug("getPayload request starts")
 
@@ -825,322 +847,69 @@ func (m *BoostService) handleGetPayload(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	// Decode the body now
-	payload := new(eth2ApiV1Deneb.SignedBlindedBeaconBlock)
-	if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-		log.Debug("could not decode Deneb request payload, attempting to decode body into Capella payload")
-		payload := new(eth2ApiV1Capella.SignedBlindedBeaconBlock)
-		if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-			log.WithError(err).WithField("body", string(body)).Error("could not decode request payload from the beacon-node (signed blinded beacon block)")
+	// Note we don't verify any of the signatures here for now since it is mocked. Might change later.
+	var payloadReq SEQPayloadRequest
+	err = payloadReq.FromJSON(body)
+	if err != nil {
+		log.WithError(err).Error("could not deserialize body from res request")
+		m.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if payloadReq.Slot != m.mockExpectedSlot {
+		errorMsg := "received unexpected slot in GetPayload request"
+		log.WithError(err).Error(errorMsg)
+		m.respondError(w, http.StatusBadRequest, errorMsg)
+	}
+
+	res := NewAnchorGetPayloadResponse(payloadReq.Slot)
+	res.Slot = payloadReq.Slot
+
+	if !m.mockMode {
+		seqTxs, err := m.seqCli.GenerateSeqTxsFromEthRaws(context.TODO(), m.mockChunkToB)
+		if err != nil {
+			log.WithError(err).Error("could not generate seq txs")
 			m.respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		m.processCapellaPayload(w, req, log, payload, body)
-		return
-	}
-	m.processDenebPayload(w, req, log, payload)
-}
 
-func (m *BoostService) handleOPGetPayload(w http.ResponseWriter, req *http.Request) {
-	log := m.log.WithField("method", "getPayload")
-	log.Debug("getPayload request starts")
-
-	vars := mux.Vars(req)
-	parentHashHex := vars["parent_hash"]
-
-	ua := UserAgent(req.Header.Get("User-Agent"))
-
-	if len(parentHashHex) != 66 {
-		m.respondError(w, http.StatusBadRequest, errInvalidHash.Error())
-		return
-	}
-
-	// Prepare relay responses
-	result := opBidResp{}                         // the final response, containing the highest bid (if any)
-	relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
-
-	// Call the relays
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, relay := range m.relays {
-		wg.Add(1)
-		go func(relay RelayEntry) {
-			defer wg.Done()
-			path := fmt.Sprintf("/eth/v1/builder/get_payload/%s", parentHashHex)
-			url := relay.GetURI(path)
-			log := log.WithField("url", url)
-			responsePayload := new(OPBid)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientOPGetPayload, http.MethodGet, url, ua, nil, nil, responsePayload)
-			if err != nil {
-				log.WithError(err).Warn("error making request to relay")
-				return
-			}
-
-			if code == http.StatusNoContent {
-				log.Debug("no-content response")
-				return
-			}
-
-			// Skip if payload is empty
-			if responsePayload.IsEmpty() {
-				return
-			}
-
-			// Getting the bid info will check if there are missing fields in the response
-			bidInfo := bidInfo{
-				blockHash:   phase0.Hash32(responsePayload.Payload.BlockHash),
-				parentHash:  phase0.Hash32(responsePayload.Payload.ParentHash),
-				blockNumber: uint64(responsePayload.Payload.BlockNumber),
-				value:       responsePayload.Value,
-
-				// ignored fields:
-				// txRoot
-				// pubkey
-			}
-
-			if phase0.Hash32(responsePayload.Payload.BlockHash) == nilHash {
-				log.Warn("relay responded with empty block hash")
-				return
-			}
-
-			valueEth := weiBigIntToEthBigFloat(responsePayload.Value.ToBig())
-			log = log.WithFields(logrus.Fields{
-				"blockNumber": bidInfo.blockNumber,
-				"blockHash":   bidInfo.blockHash.String(),
-				"value":       valueEth.Text('f', 18),
-			})
-
-			// if relay.PublicKey.String() != bidInfo.pubkey.String() {
-			// 	log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), bidInfo.pubkey.String())
-			// 	return
-			// }
-
-			// // Verify the relay signature in the relay response
-			// if !config.SkipRelaySignatureCheck {
-			// 	ok, err := checkRelaySignature(responsePayload, m.builderSigningDomain, relay.PublicKey)
-			// 	if err != nil {
-			// 		log.WithError(err).Error("error verifying relay signature")
-			// 		return
-			// 	}
-			// 	if !ok {
-			// 		log.Error("failed to verify relay signature")
-			// 		return
-			// 	}
-			// }
-
-			// Verify response coherence with proposer's input data
-			if bidInfo.parentHash.String() != parentHashHex {
-				log.WithFields(logrus.Fields{
-					"originalParentHash": parentHashHex,
-					"responseParentHash": bidInfo.parentHash.String(),
-				}).Error("proposer and relay parent hashes are not the same")
-				return
-			}
-
-			// isZeroValue := bidInfo.value.String() == "0"
-			// isEmptyListTxRoot := bidInfo.txRoot.String() == "0x7ffe241ea60187fdb0187bfa22de35d1f9bed7ab061d9401fd47e34a54fbede1"
-			// if isZeroValue || isEmptyListTxRoot {
-			// 	log.Warn("ignoring bid with 0 value")
-			// 	return
-			// }
-			log.Debug("bid received")
-
-			// Skip if value (fee) is lower than the minimum bid
-			if bidInfo.value.ToBig().Cmp(m.relayMinBid.BigInt()) == -1 {
-				log.Debug("ignoring bid below min-bid value")
-				return
-			}
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			// Remember which relays delivered which bids (multiple relays might deliver the top bid)
-			relays[BlockHashHex(bidInfo.blockHash.String())] = append(relays[BlockHashHex(bidInfo.blockHash.String())], relay)
-
-			// Compare the bid with already known top bid (if any)
-			if !result.response.IsEmpty() {
-				valueDiff := bidInfo.value.Cmp(result.bidInfo.value)
-				if valueDiff == -1 { // current bid is less profitable than already known one
-					return
-				} else if valueDiff == 0 { // current bid is equally profitable as already known one. Use hash as tiebreaker
-					previousBidBlockHash := result.bidInfo.blockHash
-					if bidInfo.blockHash.String() >= previousBidBlockHash.String() {
-						return
-					}
-				}
-			}
-
-			// Use this relay's response as mev-boost response because it's most profitable
-			log.Debug("new best bid")
-			result.response = *responsePayload
-			result.bidInfo = bidInfo
-			result.t = time.Now()
-		}(relay)
-	}
-
-	// Wait for all requests to complete...
-	wg.Wait()
-
-	if result.response.IsEmpty() {
-		log.Info("no bid received")
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	// Log result
-	valueEth := weiBigIntToEthBigFloat(result.bidInfo.value.ToBig())
-	result.relays = relays[BlockHashHex(result.bidInfo.blockHash.String())]
-	log.WithFields(logrus.Fields{
-		"blockHash":   result.bidInfo.blockHash.String(),
-		"blockNumber": result.bidInfo.blockNumber,
-		"value":       valueEth.Text('f', 18),
-		"relays":      strings.Join(RelayEntriesToStrings(result.relays), ", "),
-	}).Info("best bid")
-
-	// Remember the bid, for future logging in case of withholding
-	bidKey := bidRespKey{slot: result.bidInfo.blockNumber, blockHash: result.bidInfo.blockHash.String()}
-	m.bidsLock.Lock()
-	m.opBids[bidKey] = result
-	m.bidsLock.Unlock()
-
-	//TODO fix this part
-	//TODO this needs to create a chunk
-	transactions := make([]*chain.Transaction, len(result.response.Payload.Transactions))
-
-	vm_id := uint64(1)
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, vm_id)
-
-	chainId := "dope"
-
-	for i, seqTx := range result.response.Payload.Transactions {
-		args := &SubmitMsgTxArgs{
-			ChainId:          chainId,
-			NetworkID:        1337,
-			SecondaryChainId: buf,
-			Data:             seqTx,
-		}
-
-		t, err := m.GetSEQTransaction(*args)
+		txsRaw, err := chain.MarshalTxs(seqTxs)
 		if err != nil {
-			log.Info("get SEQ transaction failed")
-			w.WriteHeader(http.StatusNoContent)
+			log.WithError(err).Error("could not marshal seq txs")
+			m.respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
-		transactions[i] = t[0]
+
+		res.ToBPayload.Transactions = txsRaw
+
+		for k, v := range m.mockChunkRoB {
+			seqTxs, err := m.seqCli.GenerateSeqTxsFromEthRaws(context.TODO(), v)
+			if err != nil {
+				log.WithError(err).Error("could not generate seq txs")
+				m.respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+
+			txsRaw, err := chain.MarshalTxs(seqTxs)
+			if err != nil {
+				log.WithError(err).Error("could not marshal seq txs")
+				m.respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+
+			res.RoBPayloads[k] = ExecutionPayload2{
+				Slot:         m.mockExpectedSlot,
+				Transactions: txsRaw,
+			}
+		}
 	}
 
-	res := SEQResponse{
-		Hght:   uint64(result.response.Payload.BlockNumber),
-		Tmstmp: int64(result.response.Payload.Timestamp),
-		Prnt:   ids.ID(result.response.Payload.ParentHash),
-		Txs:    transactions,
-	}
-	//TODO make the payload here to return to HyperSDK
-
-	// Return the bid
-	// m.respondOK(w, &result.response.Payload)
 	m.respondOK(w, res)
 }
-
-type SubmitMsgTxArgs struct {
-	ChainId          string `json:"chain_id"`
-	NetworkID        uint32 `json:"network_id"`
-	SecondaryChainId []byte `json:"secondary_chain_id"`
-	Data             []byte `json:"data"`
-}
-
-type SEQResponse struct {
-	Prnt   ids.ID `json:"parent"`
-	Tmstmp int64  `json:"timestamp"`
-	Hght   uint64 `json:"height"`
-
-	Txs []*chain.Transaction `json:"txs"`
-}
-
-func (m *BoostService) GetSEQTransaction(args SubmitMsgTxArgs) ([]*chain.Transaction, error) {
-
-	ctx := context.Background()
-
-	chainId, err := ids.FromString(args.ChainId)
-	if err != nil {
-		return nil, err
-	}
-
-	endpoint := "fun"
-
-	if err != nil {
-		fmt.Errorf("error with id from string", "err", err)
-	}
-
-	//tcli := trpc.NewJSONRPCClient(endpoint, 1337, chainId)
-
-	cli := rpc.NewJSONRPCClient(endpoint)
-
-	unitPrices, err := cli.UnitPrices(ctx, true)
-
-	if err != nil {
-		return nil, err
-	}
-
-	parser := m.ServerParser(ctx, args.NetworkID, chainId)
-
-	priv, err := ed25519.HexToKey(
-		"323b1d8f4eed5f0da9da93071b034f2dce9d2d22692c172f3cb252a64ddfafd01b057de320297c29ad0c1f589ea216869cf1938d88c9fbd70d6748323dbf2fa7", //nolint:lll
-	)
-	factory := auth.NewED25519Factory(priv)
-
-	tpriv, err := ed25519.GeneratePrivateKey()
-	if err != nil {
-		return nil, err
-	}
-
-	trsender := tpriv.PublicKey()
-	action := &actions.SequencerMsg{
-		FromAddress: trsender,
-		Data:        args.Data,
-		ChainId:     args.SecondaryChainId,
-	}
-
-	maxUnits, err := chain.EstimateMaxUnits(parser.Rules(time.Now().UnixMilli()), action, factory, nil)
-	if err != nil {
-		return nil, err
-	}
-	maxFee, err := chain.MulSum(unitPrices, maxUnits)
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now().UnixMilli()
-	rules := parser.Rules(now)
-
-	base := &chain.Base{
-		Timestamp: utils.UnixRMilli(now, rules.GetValidityWindow()),
-		ChainID:   chainId,
-		MaxFee:    maxFee,
-	}
-
-	// Build transaction
-	actionRegistry, authRegistry := parser.Registry()
-	tx := chain.NewTx(base, nil, action, false)
-	tx, err = tx.Sign(factory, actionRegistry, authRegistry)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to sign transaction", err)
-	}
-
-	// TODO above is new!
-
-	if err := tx.AuthAsyncVerify()(); err != nil {
-		return nil, err
-	}
-
-	ret := []*chain.Transaction{tx}
-
-	return ret, nil
-
-}
+*/
 
 // CheckRelays sends a request to each one of the relays previously registered to get their status
-func (m *BoostService) CheckRelays() int {
+func (m *AnchorService) CheckRelays() int {
 	var wg sync.WaitGroup
 	var numSuccessRequestsToRelay uint32
 
@@ -1195,11 +964,9 @@ func (*ServerParser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *BoostService) ServerParser(ctx context.Context, networkId uint32, chainId ids.ID) chain.Parser {
-	//g := j.c.Genesis()
-
+func (m *AnchorService) ServerParser(ctx context.Context, networkID uint32, chainID ids.ID) chain.Parser {
 	// The only thing this is using is the ActionRegistry and AuthRegistry so this should be fine
-	return &Parser{networkId, chainId, nil}
+	return &Parser{networkID, chainID, nil}
 }
 
 var _ chain.Parser = (*Parser)(nil)
@@ -1219,10 +986,10 @@ func (p *Parser) Rules(t int64) chain.Rules {
 }
 
 func (*Parser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
-	return consts.ActionRegistry, consts.AuthRegistry
+	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *BoostService) Parser(ctx context.Context, networkID uint32, chainId ids.ID) (chain.Parser, error) {
+func (m *AnchorService) Parser(ctx context.Context, networkID uint32, chainID ids.ID) (chain.Parser, error) {
 
-	return &Parser{networkID, chainId, nil}, nil
+	return &Parser{networkID, chainID, nil}, nil
 }
