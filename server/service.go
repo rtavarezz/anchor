@@ -215,6 +215,7 @@ func (m *AnchorService) respondOK(w http.ResponseWriter, response any) {
 func (m *AnchorService) getRouter() http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/", m.handleRoot)
+	r.HandleFunc("/livez", m.handleLivez).Methods(http.MethodGet)
 
 	r.HandleFunc(pathStatus, m.handleStatus).Methods(http.MethodGet)
 	r.HandleFunc(pathRegisterValidator, m.handleRegisterValidator).Methods(http.MethodPost)
@@ -305,6 +306,27 @@ func (m *AnchorService) sendValidatorRegistrationsToRelayMonitors(payload []buil
 
 func (m *AnchorService) handleRoot(w http.ResponseWriter, _ *http.Request) {
 	m.respondOK(w, nilResponse)
+}
+
+func (m *AnchorService) handleLivez(w http.ResponseWriter, req *http.Request) {
+	m.respondMsg(w, http.StatusOK, "live")
+}
+
+func (m *AnchorService) respondMsg(w http.ResponseWriter, code int, msg string) {
+	m.respond(w, code, HTTPMessageResp{msg})
+}
+
+func (m *AnchorService) respond(w http.ResponseWriter, code int, response any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if response == nil {
+		return
+	}
+
+	// write the json response
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+	}
 }
 
 // handleStatus sends calls to the status endpoint of every relay.
