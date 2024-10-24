@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	LOWER_THAN_MIN_BID_FLOOR  = 0
-	LARGER_THAN_MIN_BID_FLOOR = 20000
-	TEST_RELAY_TIMEOUT        = 10
+	LowerThanMinBidFloor  = 0
+	LargerThanMinBidFloor = 20000
+	TestRelayTimeout      = 10
 )
 
 type testBackend struct {
@@ -110,32 +110,33 @@ func TestNewBoostServiceErrors(t *testing.T) {
 
 func TestWebserver(t *testing.T) {
 	t.Run("errors when webserver is already existing", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 		backend.boost.srv = &http.Server{}
 		err := backend.boost.StartHTTPServer()
 		require.Error(t, err)
 	})
 
 	t.Run("webserver error on invalid listenAddr", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 		backend.boost.listenAddr = "localhost:876543"
 		err := backend.boost.StartHTTPServer()
 		require.Error(t, err)
 	})
 
 	t.Run("webserver starts normally", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 		go func() {
 			err := backend.boost.StartHTTPServer()
 			require.NoError(t, err)
 		}()
 		time.Sleep(time.Millisecond * 100)
-		backend.boost.srv.Close()
+		err := backend.boost.srv.Close()
+		require.NoError(t, err)
 	})
 }
 
 func TestWebserverRootHandler(t *testing.T) {
-	backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+	backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 
 	// Check root handler
 	req, _ := http.NewRequest(http.MethodGet, "/", nil)
@@ -146,7 +147,7 @@ func TestWebserverRootHandler(t *testing.T) {
 }
 
 func TestWebserverMaxHeaderSize(t *testing.T) {
-	backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+	backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 	addr := "localhost:1234"
 	backend.boost.listenAddr = addr
 	go func() {
@@ -158,12 +159,13 @@ func TestWebserverMaxHeaderSize(t *testing.T) {
 	code, err := SendHTTPRequest(context.Background(), *http.DefaultClient, http.MethodGet, path, "test", nil, nil, nil)
 	require.Error(t, err)
 	require.Equal(t, http.StatusRequestHeaderFieldsTooLarge, code)
-	backend.boost.srv.Close()
+	err = backend.boost.srv.Close()
+	require.NoError(t, err)
 }
 
 func TestStatus(t *testing.T) {
 	t.Run("At least one relay is available", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 		time.Sleep(time.Millisecond * 20)
 		path := "/eth/v1/builder/status"
 		rr := backend.request(t, http.MethodGet, path, nil)
@@ -174,7 +176,7 @@ func TestStatus(t *testing.T) {
 	})
 
 	t.Run("No relays available", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 		backend.relays[0].Server.Close() // makes the relay unavailable
 
 		path := "/eth/v1/builder/status"
@@ -201,14 +203,14 @@ func TestRegisterValidator(t *testing.T) {
 	payload := []builderApiV1.SignedValidatorRegistration{reg}
 
 	t.Run("Normal function", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 		rr := backend.request(t, http.MethodPost, path, payload)
 		require.Equal(t, http.StatusOK, rr.Code)
 		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
 	})
 
 	t.Run("Relay error response", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 
 		backend.relays[0].ResponseDelay = 5 * time.Millisecond
 		backend.relays[1].ResponseDelay = 5 * time.Millisecond
@@ -254,14 +256,6 @@ func TestRegisterValidator(t *testing.T) {
 
 func getHeaderPath(slot uint64, parentHash ids.ID, pubkey phase0.BLSPubKey) string {
 	return fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.String(), pubkey.String())
-}
-
-func getHeaderPath2(slot uint64, parentHash phase0.Hash32, pubkey phase0.BLSPubKey, numtobtxs int, numrobchains int, numrobchunktxs int) string {
-	return fmt.Sprintf("/eth/v1/builder/header2/%d/%s/%s/%d/%d/%d", slot, parentHash.String(), pubkey.String(), numtobtxs, numrobchains, numrobchunktxs)
-}
-
-func getPayloadPath2() string {
-	return fmt.Sprintf("/eth/v1/builder/blinded_blocks2")
 }
 
 func TestVerifyHeaderSignatures(t *testing.T) {
@@ -339,21 +333,21 @@ func TestGetHeader(t *testing.T) {
 	})
 
 	t.Run("Okay response from relay with both tob and rob", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 		rr := backend.request(t, http.MethodGet, path, nil)
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
 	})
 
 	t.Run("Okay response from relay with both tob and rob", func(t *testing.T) {
-		backend := newTestBackend(t, 1, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 1, time.Second*TestRelayTimeout)
 		rr := backend.request(t, http.MethodGet, path, nil)
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
 	})
 
 	t.Run("Empty payload returns no status content", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 		resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, nil, nil)
 
 		// nil tob and rob will return no content.
@@ -370,9 +364,9 @@ func TestGetHeader(t *testing.T) {
 	})
 
 	t.Run("Good response from relays, tob and no robs", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 
-		tobHeader, err := MakeRandomAnchorHeader(LARGER_THAN_MIN_BID_FLOOR) // value must be over min req to be valid
+		tobHeader, err := MakeRandomAnchorHeader(LargerThanMinBidFloor) // value must be over min req to be valid
 		require.NoError(t, err)
 
 		resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, tobHeader, nil)
@@ -394,9 +388,9 @@ func TestGetHeader(t *testing.T) {
 	})
 
 	t.Run("Only tob but below floor", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 
-		tobHeader, err := MakeRandomAnchorHeader(LOWER_THAN_MIN_BID_FLOOR) // value will be below floor
+		tobHeader, err := MakeRandomAnchorHeader(LowerThanMinBidFloor) // value will be below floor
 		require.NoError(t, err)
 
 		resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, tobHeader, nil)
@@ -417,13 +411,12 @@ func TestGetHeader(t *testing.T) {
 	})
 
 	t.Run("one valid rob", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 
-		robHeader, err := MakeRandomAnchorHeader(LARGER_THAN_MIN_BID_FLOOR) // value will be below floor
+		robHeader, err := MakeRandomAnchorHeader(LargerThanMinBidFloor) // value will be below floor
 		require.NoError(t, err)
 
-		var robHeaders map[string]*AnchorHeader
-		robHeaders = make(map[string]*AnchorHeader, 0)
+		robHeaders := make(map[string]*AnchorHeader, 0)
 		robHeaders[TestChainID1] = robHeader
 
 		resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, nil, &robHeaders)
@@ -444,16 +437,15 @@ func TestGetHeader(t *testing.T) {
 	})
 
 	t.Run("one valid rob, one invalid tob, good overall", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 
 		tobHeader, err := MakeRandomAnchorHeader(0) // value will be below floor
 		require.NoError(t, err)
 
-		robHeader, err := MakeRandomAnchorHeader(LARGER_THAN_MIN_BID_FLOOR) // value will be below floor
+		robHeader, err := MakeRandomAnchorHeader(LargerThanMinBidFloor) // value will be below floor
 		require.NoError(t, err)
 
-		var robHeaders map[string]*AnchorHeader
-		robHeaders = make(map[string]*AnchorHeader, 0)
+		robHeaders := make(map[string]*AnchorHeader, 0)
 		robHeaders[TestChainID1] = robHeader
 
 		resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, tobHeader, &robHeaders)
@@ -474,19 +466,18 @@ func TestGetHeader(t *testing.T) {
 	})
 
 	t.Run("one invalid rob, one valid rob, one invalid tob, good overall", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 
-		tobHeader, err := MakeRandomAnchorHeader(LOWER_THAN_MIN_BID_FLOOR) // value will be below floor
+		tobHeader, err := MakeRandomAnchorHeader(LowerThanMinBidFloor) // value will be below floor
 		require.NoError(t, err)
 
-		robHeader, err := MakeRandomAnchorHeader(LOWER_THAN_MIN_BID_FLOOR) // value will be below floor
+		robHeader, err := MakeRandomAnchorHeader(LowerThanMinBidFloor) // value will be below floor
 		require.NoError(t, err)
 
-		robHeader2, err := MakeRandomAnchorHeader(LARGER_THAN_MIN_BID_FLOOR) // value will be below floor
+		robHeader2, err := MakeRandomAnchorHeader(LargerThanMinBidFloor) // value will be below floor
 		require.NoError(t, err)
 
-		var robHeaders map[string]*AnchorHeader
-		robHeaders = make(map[string]*AnchorHeader)
+		robHeaders := make(map[string]*AnchorHeader)
 		robHeaders[TestChainID1] = robHeader
 		robHeaders[TestChainID2] = robHeader2
 
@@ -508,9 +499,9 @@ func TestGetHeader(t *testing.T) {
 	})
 
 	t.Run("Invalid relay public key in msg", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 
-		tobHeader, err := MakeRandomAnchorHeader(LARGER_THAN_MIN_BID_FLOOR) // value must be over min req to be valid
+		tobHeader, err := MakeRandomAnchorHeader(LargerThanMinBidFloor) // value must be over min req to be valid
 		require.NoError(t, err)
 
 		resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, tobHeader, nil)
@@ -524,33 +515,11 @@ func TestGetHeader(t *testing.T) {
 		rr := backend.request(t, http.MethodGet, path, nil)
 		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
 		require.Equal(t, http.StatusNoContent, rr.Code)
-
-		/*
-		   backend := newTestBackend(t, 1, time.Second * TEST_RELAY_TIMEOUT)
-
-		   backend.relays[0].GetHeaderResponse = backend.relays[0].MakeGetHeaderResponse(
-		     12345,
-		     "0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-		     "0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-		     "0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
-		     spec.DataVersionCapella,
-		   )
-
-		   // Simulate a different public key registered to mev-boost
-		   pk := phase0.BLSPubKey{}
-		   backend.boost.relays[0].PublicKey = pk
-
-		   rr := backend.request(t, http.MethodGet, path, nil)
-		   require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
-
-		   // Request should have no content
-		   require.Equal(t, http.StatusNoContent, rr.Code)
-		*/
 	})
 	/*
 
 		t.Run("Invalid relay signature", func(t *testing.T) {
-			backend := newTestBackend(t, 1, time.Second * TEST_RELAY_TIMEOUT)
+			backend := newTestBackend(t, 1, time.Second * TestRelayTimeout)
 
 			backend.relays[0].GetHeaderResponse = backend.relays[0].MakeGetHeaderResponse(
 				12345,
@@ -575,7 +544,7 @@ func TestGetHeader(t *testing.T) {
 			slot := fmt.Sprintf("%d0", uint64(math.MaxUint64))
 			invalidSlotPath := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, hash.String(), pubkey.String())
 
-			backend := newTestBackend(t, 1, time.Second * TEST_RELAY_TIMEOUT)
+			backend := newTestBackend(t, 1, time.Second * TestRelayTimeout)
 			rr := backend.request(t, http.MethodGet, invalidSlotPath, nil)
 			require.Equal(t, `{"code":400,"message":"invalid slot"}`+"\n", rr.Body.String())
 			require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
@@ -585,7 +554,7 @@ func TestGetHeader(t *testing.T) {
 		t.Run("Invalid pubkey length", func(t *testing.T) {
 			invalidPubkeyPath := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", 1, hash.String(), "0x1")
 
-			backend := newTestBackend(t, 1, time.Second * TEST_RELAY_TIMEOUT)
+			backend := newTestBackend(t, 1, time.Second * TestRelayTimeout)
 			rr := backend.request(t, http.MethodGet, invalidPubkeyPath, nil)
 			require.Equal(t, `{"code":400,"message":"invalid pubkey"}`+"\n", rr.Body.String())
 			require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
@@ -595,7 +564,7 @@ func TestGetHeader(t *testing.T) {
 		t.Run("Invalid hash length", func(t *testing.T) {
 			invalidSlotPath := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", 1, "0x1", pubkey.String())
 
-			backend := newTestBackend(t, 1, time.Second * TEST_RELAY_TIMEOUT)
+			backend := newTestBackend(t, 1, time.Second * TestRelayTimeout)
 			rr := backend.request(t, http.MethodGet, invalidSlotPath, nil)
 			require.Equal(t, `{"code":400,"message":"invalid hash"}`+"\n", rr.Body.String())
 			require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
@@ -603,7 +572,7 @@ func TestGetHeader(t *testing.T) {
 		})
 
 		t.Run("Invalid parent hash", func(t *testing.T) {
-			backend := newTestBackend(t, 1, time.Second * TEST_RELAY_TIMEOUT)
+			backend := newTestBackend(t, 1, time.Second * TestRelayTimeout)
 
 			invalidParentHashPath := getHeaderPath(1, phase0.Hash32{}, pubkey)
 			rr := backend.request(t, http.MethodGet, invalidParentHashPath, nil)
@@ -674,7 +643,7 @@ func TestGetHeaderBids(t *testing.T) {
 
 	t.Run("Use header with lowest blockhash if same value", func(t *testing.T) {
 		// Create backend and register 3 relays.
-		backend := newTestBackend(t, 3, time.Second * TEST_RELAY_TIMEOUT)
+		backend := newTestBackend(t, 3, time.Second * TestRelayTimeout)
 
 		backend.relays[0].GetHeaderResponse = backend.relays[0].MakeGetHeaderResponse(
 			12345,
@@ -970,6 +939,7 @@ func TestGetPayloadToAllRelays(t *testing.T) {
 }
 */
 
+/*
 func TestMockAnchor(t *testing.T) {
 	hash := _HexToHash("0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7")
 	pubkey := _HexToPubkey(
@@ -1007,3 +977,4 @@ func TestMockAnchor(t *testing.T) {
 	//	require.Equal(t, numRoBChunkTxs, len(v.Transactions))
 	//}
 }
+*/

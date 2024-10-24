@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,15 +16,14 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 
 	seqconsts "github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/ava-labs/avalanchego/ids"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/hypersdk/chain"
 	"github.com/AnomalyFi/hypersdk/crypto/ed25519"
-	"github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
 	"github.com/AnomalyFi/anchor/config"
@@ -51,22 +48,13 @@ var (
 	errInvalidPubkey             = errors.New("invalid pubkey")
 	errNoSuccessfulRelayResponse = errors.New("no successful relay response")
 	errServerAlreadyRunning      = errors.New("server already running")
-	errInvalidToBTxs             = errors.New("invalid ToBTxs")
-	errInvalidRoBChains          = errors.New("invalid RoBChains")
-	errInvalidRoBChunkTxs        = errors.New("invalid RoBChunkTxs")
-)
-
-var (
-	value    big.Int
-	gasLimit uint64
-	gasPrice big.Int
-	data     string
 )
 
 var (
 	nilHash     = phase0.Hash32{}
 	nilHash2    = common.Hash{}
 	nilResponse = struct{}{}
+	data        string
 )
 
 type httpErrorResp struct {
@@ -129,11 +117,7 @@ type AnchorService struct {
 	slotUIDLock sync.Mutex
 
 	// Below used only for testing
-	mockMode         bool
-	mockChunkToB     []hexutil.Bytes
-	mockChunkRoB     map[string][]hexutil.Bytes
-	mockCurrNonce    uint64
-	mockExpectedSlot uint64
+	mockMode bool
 
 	// SEQ client
 	// not created when mock mode enabled
@@ -210,19 +194,6 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 	}, nil
 }
 
-// Intended for testing only
-func (m *AnchorService) getNextMockNonce() uint64 {
-	nonce := m.mockCurrNonce
-	m.mockCurrNonce++
-	return nonce
-}
-
-func (m *AnchorService) incrNextMockNonce(delta uint64) uint64 {
-	nonce := m.mockCurrNonce
-	m.mockCurrNonce += delta
-	return nonce
-}
-
 func (m *AnchorService) respondError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -246,6 +217,7 @@ func (m *AnchorService) respondOK(w http.ResponseWriter, response any) {
 func (m *AnchorService) getRouter() http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/", m.handleRoot)
+	r.HandleFunc("/livez", m.handleLivez).Methods(http.MethodGet)
 
 	r.HandleFunc(pathStatus, m.handleStatus).Methods(http.MethodGet)
 	r.HandleFunc(pathRegisterValidator, m.handleRegisterValidator).Methods(http.MethodPost)
@@ -254,8 +226,8 @@ func (m *AnchorService) getRouter() http.Handler {
 	r.HandleFunc(pathGetPayload, m.handleGetPayload).Methods(http.MethodPost)
 
 	// These are mock handlers for the SEQ-Anchor interface. This will be stubbed in for now.
-	r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
-	r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
+	//r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
+	//r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
 
 	r.Use(mux.CORSMethodMiddleware(r))
 	loggedRouter := httplogger.LoggingMiddlewareLogrus(m.log, r)
@@ -306,9 +278,9 @@ func (m *AnchorService) sendValidatorRegistrationsToRelayMonitors(payload []buil
 	log := m.log.WithField("method", "sendValidatorRegistrationsToRelayMonitors").WithField("numRegistrations", len(payload))
 	for _, relayMonitor := range m.relayMonitors {
 		go func(relayMonitor *url.URL) {
-			url := GetURI(relayMonitor, pathRegisterValidator)
-			log = log.WithField("url", url)
-			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, url, "", nil, payload, nil)
+			uri := GetURI(relayMonitor, pathRegisterValidator)
+			log = log.WithField("uri", uri)
+			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, uri, "", nil, payload, nil)
 			if err != nil {
 				log.WithError(err).Warn("error calling registerValidator on relay monitor")
 				return
@@ -336,6 +308,27 @@ func (m *AnchorService) sendValidatorRegistrationsToRelayMonitors(payload []buil
 
 func (m *AnchorService) handleRoot(w http.ResponseWriter, _ *http.Request) {
 	m.respondOK(w, nilResponse)
+}
+
+func (m *AnchorService) handleLivez(w http.ResponseWriter, _ *http.Request) {
+	m.respondMsg(w, http.StatusOK, "live")
+}
+
+func (m *AnchorService) respondMsg(w http.ResponseWriter, code int, msg string) {
+	m.respond(w, code, HTTPMessageResp{msg})
+}
+
+func (m *AnchorService) respond(w http.ResponseWriter, code int, response any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if response == nil {
+		return
+	}
+
+	// write the json response
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+	}
 }
 
 // handleStatus sends calls to the status endpoint of every relay.
@@ -370,10 +363,10 @@ func (m *AnchorService) handleRegisterValidator(w http.ResponseWriter, req *http
 
 	for _, relay := range m.relays {
 		go func(relay RelayEntry) {
-			url := relay.GetURI(pathRegisterValidator)
-			log := log.WithField("url", url)
+			uri := relay.GetURI(pathRegisterValidator)
+			log := log.WithField("uri", uri)
 
-			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, url, ua, nil, payload, nil)
+			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, uri, ua, nil, payload, nil)
 			relayRespCh <- err
 			if err != nil {
 				log.WithError(err).Warn("error calling registerValidator on relay")
@@ -476,7 +469,8 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			url := relay.GetURI(path)
 			log := log.WithField("url", url)
 
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, batonResponse)
+			localResponse := new(AnchorGetHeaderResponse)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, localResponse)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
@@ -488,29 +482,29 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			}
 
 			// Skip if payload is empty
-			if batonResponse.IsEmpty() {
+			if localResponse.IsEmpty() {
 				log.Warn("baton responded with empty header block")
 				return
 			}
 
-			hasToB := batonResponse.ExecHeaders.ToBHash != nil
-			if hasToB && *batonResponse.ExecHeaders.ToBHash.Header == nilHash2 {
+			hasToB := localResponse.ExecHeaders.ToBHash != nil
+			if hasToB && *localResponse.ExecHeaders.ToBHash.Header == nilHash2 {
 				log.Warn("baton responded with empty tob block hash")
 				return
 			}
 
 			var tobValue uint64
 			if hasToB {
-				tobValue = batonResponse.ExecHeaders.ToBHash.Value.Uint64()
+				tobValue = localResponse.ExecHeaders.ToBHash.Value.Uint64()
 			}
 
 			var robValues string
-			for chainID, robChunk := range batonResponse.ExecHeaders.RoBHashes {
+			for chainID, robChunk := range localResponse.ExecHeaders.RoBHashes {
 				robValues = robValues + "[" + chainID + ":" + robChunk.Value.String() + "], "
 			}
 
 			log = log.WithFields(logrus.Fields{
-				"slot":       batonResponse.BlockInfo.Slot,
+				"slot":       localResponse.BlockInfo.Slot,
 				"tob_value":  tobValue,
 				"rob_values": robValues,
 			})
@@ -533,7 +527,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 					return
 				}
 
-				ok, err := VerifyHeaderSignature(batonResponse, *relayBlsPubKey)
+				ok, err := VerifyHeaderSignature(localResponse, *relayBlsPubKey)
 				if err != nil {
 					log.WithError(err).Error("error verifying relay signature")
 					return
@@ -546,16 +540,15 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 
 			// filter out invalid chunks
 			relayMinBid := m.relayMinBid.BigInt()
-			if hasToB && !VerifyHeader(batonResponse.ExecHeaders.ToBHash, relayMinBid, log) {
-				batonResponse.ExecHeaders.ToBHash = nil
-				hasToB = false
+			if hasToB && !VerifyHeader(localResponse.ExecHeaders.ToBHash, relayMinBid, log) {
+				localResponse.ExecHeaders.ToBHash = nil
 				log.Info("filtering out tob block")
 				chunksNotGood.Store(true)
 			}
 
-			for chainID, robChunk := range batonResponse.ExecHeaders.RoBHashes {
+			for chainID, robChunk := range localResponse.ExecHeaders.RoBHashes {
 				if !VerifyHeader(robChunk, relayMinBid, log) {
-					delete(batonResponse.ExecHeaders.RoBHashes, chainID)
+					delete(localResponse.ExecHeaders.RoBHashes, chainID)
 					log.Info("filtering out rob block for chain id: ", chainID)
 					chunksNotGood.Store(true)
 				}
@@ -564,10 +557,12 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			mu.Lock()
 			defer mu.Unlock()
 
-			if batonResponse.ExecHeaders.ToBHash != nil {
-				relays[BlockHashHex(batonResponse.ExecHeaders.ToBHash.BlockHash)] = append(relays[BlockHashHex(batonResponse.ExecHeaders.ToBHash.BlockHash)], relay)
+			if localResponse.ExecHeaders.ToBHash != nil {
+				relays[BlockHashHex(localResponse.ExecHeaders.ToBHash.BlockHash)] = append(relays[BlockHashHex(localResponse.ExecHeaders.ToBHash.BlockHash)], relay)
 			}
 
+			// make local response visible to main handler thread
+			batonResponse = localResponse
 			responseIsGood.Store(true)
 		}(relay)
 
@@ -606,6 +601,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 	m.respondOK(w, batonResponse)
 }
 
+/*
 // Mock implementation
 func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Request) {
 	//TODO: everytime this function is called, we need mock chunks
@@ -691,6 +687,7 @@ func (m *AnchorService) handleGetHeader2(w http.ResponseWriter, req *http.Reques
 
 	m.respondOK(w, res)
 }
+*/
 
 // original implementation
 func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Request) {
@@ -712,8 +709,6 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 		m.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	// @TODO: Check the signature. Does it match the one we want?
 
 	// Get the currentSlotUID for this slot
 	currentSlotUID := ""
@@ -749,7 +744,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	m.bidsLock.Lock()
 	originalBid := m.bids[bidKey]
 	m.bidsLock.Unlock()
-	if originalBid.bidInfo.IsEmpty() {
+	if originalBid.bidInfo == nil || originalBid.bidInfo.IsEmpty() {
 		log.Error("no bid for this getPayload payload found, was getHeader called before?")
 	} else if len(originalBid.relays) == 0 {
 		log.Warn("bid found but no associated relays")
@@ -775,8 +770,8 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 		// TODO: Since we know there is only a single Baton instance. We could probably cut out the goroutine.
 		go func(relay RelayEntry) {
 			defer wg.Done()
-			url := relay.GetURI(pathGetPayload)
-			log := log.WithField("url", url)
+			uri := relay.GetURI(pathGetPayload)
+			log := log.WithField("uri", uri)
 			log.Debug("calling getPayload")
 
 			localResult := NewAnchorGetPayloadResponse(uint64(0), true)
@@ -785,7 +780,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 				requestCtx,
 				m.httpClientGetPayload,
 				http.MethodPost,
-				url,
+				uri,
 				ua,
 				headers,
 				payloadReq,
@@ -868,6 +863,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 	m.respondOK(w, result)
 }
 
+/*
 // Mock custom handler. Note this is a true mock. It does no checking of the info
 // received from SEQ and just sends the payload back.
 func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Request) {
@@ -897,7 +893,7 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 		m.respondError(w, http.StatusBadRequest, errorMsg)
 	}
 
-	res := NewSEQPayloadResponse(payloadReq.Slot)
+	res := NewAnchorGetPayloadResponse(payloadReq.Slot)
 	res.Slot = payloadReq.Slot
 
 	if !m.mockMode {
@@ -941,6 +937,7 @@ func (m *AnchorService) handleGetPayload2(w http.ResponseWriter, req *http.Reque
 
 	m.respondOK(w, res)
 }
+*/
 
 // CheckRelays sends a request to each one of the relays previously registered to get their status
 func (m *AnchorService) CheckRelays() int {
@@ -952,11 +949,11 @@ func (m *AnchorService) CheckRelays() int {
 
 		go func(relay RelayEntry) {
 			defer wg.Done()
-			url := relay.GetURI(pathStatus)
-			log := m.log.WithField("url", url)
+			uri := relay.GetURI(pathStatus)
+			log := m.log.WithField("uri", uri)
 			log.Debug("checking relay status")
 
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, "", nil, nil, nil)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, uri, "", nil, nil, nil)
 			if err != nil {
 				log.WithError(err).Error("relay status error - request failed")
 				return
@@ -998,11 +995,9 @@ func (*ServerParser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *AnchorService) ServerParser(ctx context.Context, networkId uint32, chainId ids.ID) chain.Parser {
-	//g := j.c.Genesis()
-
+func (m *AnchorService) ServerParser(_ context.Context, networkID uint32, chainID ids.ID) chain.Parser {
 	// The only thing this is using is the ActionRegistry and AuthRegistry so this should be fine
-	return &Parser{networkId, chainId, nil}
+	return &Parser{networkID, chainID, nil}
 }
 
 var _ chain.Parser = (*Parser)(nil)
@@ -1022,10 +1017,10 @@ func (p *Parser) Rules(t int64) chain.Rules {
 }
 
 func (*Parser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
-	return consts.ActionRegistry, consts.AuthRegistry
+	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *AnchorService) Parser(ctx context.Context, networkID uint32, chainId ids.ID) (chain.Parser, error) {
+func (m *AnchorService) Parser(_ context.Context, networkID uint32, chainID ids.ID) (chain.Parser, error) {
 
-	return &Parser{networkID, chainId, nil}, nil
+	return &Parser{networkID, chainID, nil}, nil
 }

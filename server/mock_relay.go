@@ -13,7 +13,6 @@ import (
 
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/log"
 	"golang.org/x/exp/rand"
 
 	builderApiCapella "github.com/attestantio/go-builder-client/api/capella"
@@ -37,36 +36,15 @@ const (
 )
 
 var (
-	skBytes, _                  = hexutil.Decode(mockRelaySecretKeyHex)
-	mockRelaySecretKey, _       = bls.SecretKeyFromBytes(skBytes)
-	mockRelayPublicKey, _       = bls.PublicKeyFromSecretKey(mockRelaySecretKey)
-	TestMockExpectedToBValue    = big.NewInt(20000)
-	TestMockExpectedRoBValue1   = big.NewInt(20100)
-	TestMockExpectedRoBValue2   = big.NewInt(20002)
-	TestChainID1                = "chain_id1"
-	TestChainID2                = "chain_id2"
-	DefaultTestPayloadNumToBTxs = 1
-	DefaultTestPayloadNumRoBTxs = 2
+	skBytes, _                = hexutil.Decode(mockRelaySecretKeyHex)
+	mockRelaySecretKey, _     = bls.SecretKeyFromBytes(skBytes)
+	mockRelayPublicKey, _     = bls.PublicKeyFromSecretKey(mockRelaySecretKey)
+	TestMockExpectedToBValue  = big.NewInt(20000)
+	TestMockExpectedRoBValue1 = big.NewInt(20100)
+	TestMockExpectedRoBValue2 = big.NewInt(20002)
+	TestChainID1              = "chain_id1"
+	TestChainID2              = "chain_id2"
 )
-
-// These are set when a header is generated
-var TestMockExpectedToBHeader *common.Hash
-var TestMockExpectedRoBHeader1 *common.Hash
-var TestMockExpectedRoBHeader2 *common.Hash
-
-var TestMockExpectedToBBlockHash string
-var TestMockExpectedRoBBlockHash1 string
-var TestMockExpectedRoBBlockHash2 string
-
-var TestChunkHash string
-
-func init() {
-	chunkHash, err := generateRandomHash()
-	if err != nil {
-		log.Error("Could not init test chunk hash, err: ", err)
-	}
-	TestChunkHash = chunkHash.String()
-}
 
 // mockRelay is used to fake a relay's behavior.
 // You can override each of its handler by setting the instance's HandlerOverride_METHOD_TO_OVERRIDE to your own
@@ -162,14 +140,20 @@ func (m *mockRelay) GetRequestCount(path string) int {
 func (m *mockRelay) handleRoot(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{}`)
+	_, err := fmt.Fprintf(w, `{}`)
+	if err != nil {
+		panic(err)
+	}
 }
 
 // By default, handleStatus returns the relay's status as http.StatusOK
 func (m *mockRelay) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{}`)
+	_, err := fmt.Fprintf(w, `{}`)
+	if err != nil {
+		panic(err)
+	}
 }
 
 // By default, handleRegisterValidator returns a default builderApiV1.SignedValidatorRegistration
@@ -304,46 +288,40 @@ func MakeRandomAnchorHeader(valueFloor int) (*AnchorHeader, error) {
 	}, nil
 }
 
-// MakeAnchorGetHeaderResponse is used to create the default or can be used to create a custom response to the getHeader
+// MakeRandomAnchorGetHeaderResponse is used to create the default or can be used to create a custom response to the getHeader
 func MakeRandomAnchorGetHeaderResponse(slot uint64) *AnchorGetHeaderResponse {
 	tobHash, err := generateRandomHash()
 	if err != nil {
 		return nil
 	}
-	TestMockExpectedToBHeader = &tobHash
 
 	tobBlockHashStr, err := generateRandomHash()
 	tobBlockHash := tobBlockHashStr.String()
 	if err != nil {
 		return nil
 	}
-	TestMockExpectedToBBlockHash = tobBlockHash
 
 	robHash1, err := generateRandomHash()
 	if err != nil {
 		return nil
 	}
-	TestMockExpectedRoBHeader1 = &robHash1
 
 	robBlockHashStr1, err := generateRandomHash()
 	robBlockHash1 := robBlockHashStr1.String()
 	if err != nil {
 		return nil
 	}
-	TestMockExpectedRoBBlockHash1 = robBlockHash1
 
 	robHash2, err := generateRandomHash()
 	if err != nil {
 		return nil
 	}
-	TestMockExpectedRoBHeader2 = &robHash2
 
 	robBlockHashStr2, err := generateRandomHash()
 	robBlockHash2 := robBlockHashStr2.String()
 	if err != nil {
 		return nil
 	}
-	TestMockExpectedRoBBlockHash2 = robBlockHash2
 
 	tobAnchorHeader := AnchorHeader{
 		Header:    &tobHash,
@@ -481,7 +459,7 @@ func (m *mockRelay) defaultHandleGetHeader(w http.ResponseWriter) {
 	}
 }
 
-// MakeGetPayloadResponse is used to create the default or can be used to create a custom response to the getPayload
+// MakeAnchorGetPayloadResponse is used to create the default or can be used to create a custom response to the getPayload
 func MakeAnchorGetPayloadResponse(
 	slot uint64,
 ) *AnchorGetPayloadResponse {
@@ -511,8 +489,7 @@ func MakeRandomAnchorGetPayloadResponse(
 		}
 	}
 
-	var robPayloads map[string]ExecutionPayload
-	robPayloads = make(map[string]ExecutionPayload)
+	robPayloads := make(map[string]ExecutionPayload)
 
 	for _, robChainID := range robChainIDs {
 		robPayload, err := MakeRandomExecutionPayload(numTxs)

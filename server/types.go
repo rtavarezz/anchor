@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/AnomalyFi/hypersdk/codec"
-	"github.com/attestantio/go-eth2-client/spec/bellatrix"
-	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ava-labs/avalanchego/ids"
 	"github.com/flashbots/go-boost-utils/bls"
 
@@ -21,8 +18,7 @@ import (
 
 type ErrorCode int
 
-// TODO: Resolve what should be done with the below later.
-// This should be same as the signature type used in Baton.
+// Signature should be same as the signature type used in Baton.
 // This is included here because the Signature type was modified in the latest version of flashbots.
 type Signature [96]byte
 
@@ -64,134 +60,8 @@ func (bid *OPBid) IsEmpty() bool {
 	return bid.Value == nil || bid.Payload == nil
 }
 
-// What we send to response
-type ExecutionPayload2 struct {
-	Slot      uint64      `json:"slot"`
-	BlockHash common.Hash `json:"blockHash"`
-	// SEQ marshalled txs
-	Transactions []byte `json:"transactions"`
-}
-
-// e.g seq sends request to Anchor
-type SEQHeaderRequest struct {
-	Slot           uint64 `json:"slot"`
-	NumToBTxs      int    `json:"numtobtxs,omitempty"`
-	NumRoBChains   int    `json:"numrobchains,omitempty"`
-	NumRoBChunkTxs int    `json:"numrobchunktxs,omitempty"`
-}
-
-type SEQHeaderResponse struct {
-	Slot uint64 `json:"slot"`
-	// nodeID of chunk producing validator.
-	Producer ids.NodeID `json:"producer"`
-	// block builder address
-	PriorityFeeReceiverAddr codec.Address `json:"priorityfeereceiveraddr"`
-	// hash of the anchor chunks (tob + robs)
-	ChunkHash common.Hash            `json:"chunkhash"`
-	ToBHash   *common.Hash           `json:"tobhash"`
-	RoBHashes map[string]common.Hash `json:"robhashes"`
-}
-
-func NewSEQHeaderResponse(slot uint64) SEQHeaderResponse {
-	return SEQHeaderResponse{
-		Slot:      slot,
-		RoBHashes: make(map[string]common.Hash),
-	}
-}
-
-func (msg *SEQHeaderResponse) IsEmpty() bool {
-	return msg.ToBHash == nil && (msg.RoBHashes == nil || len(msg.RoBHashes) == 0)
-}
-
-// @TODO: This is deprecated. Remove later when mock methods no longer needed.
-type SEQPayloadRequest struct {
-	Slot                   uint64                                    `json:"slot"`
-	ToBBlindedBeaconBlock  AnchorSignedBlindedBeaconBlock            `json:"tobblindedbeaconblock"`
-	RoBBlindedBeaconBlocks map[string]AnchorSignedBlindedBeaconBlock `json:"robblindedbeaconblocks"`
-}
-
-// @TODO: This is deprecated. Remove later when mock methods no longer needed.
-func NewSEQPayloadRequest(slot uint64) SEQPayloadRequest {
-	return SEQPayloadRequest{
-		Slot:                   slot,
-		RoBBlindedBeaconBlocks: make(map[string]AnchorSignedBlindedBeaconBlock),
-	}
-}
-
-// Send this back to SEQ
-type SEQPayloadResponse struct {
-	Slot        uint64                       `json:"slot"`
-	ToBPayload  ExecutionPayload2            `json:"tobpayload"`
-	RoBPayloads map[string]ExecutionPayload2 `json:"robpayloads"`
-}
-
-func NewSEQPayloadResponse(slot uint64) SEQPayloadResponse {
-	return SEQPayloadResponse{
-		Slot:        slot,
-		RoBPayloads: make(map[string]ExecutionPayload2),
-	}
-}
-
-// @TODO: This is deprecated. Remove later when mock methods no longer needed.
-type AnchorSignedBlindedBeaconBlock struct {
-	Message   *AnchorBlindedBeaconBlock
-	Signature phase0.BLSSignature `ssz-size:"96"`
-}
-
-// @TODO: This is deprecated. Remove later when mock methods no longer needed.
-type AnchorBlindedBeaconBlock struct {
-	Slot          phase0.Slot
-	ProposerIndex phase0.ValidatorIndex
-	ParentRoot    phase0.Root `ssz-size:"32"`
-	StateRoot     phase0.Root `ssz-size:"32"`
-	Body          *AnchorBlindedBeaconBlockBody
-}
-
-// @TODO: This is deprecated. Remove later when mock methods no longer needed.
-type AnchorBlindedBeaconBlockBody struct {
-	ExecutionPayloadHeader *AnchorExecutionPayloadHeader
-}
-
-// @TODO: This is deprecated. Remove later when mock methods no longer needed.
-// receiving payload from SEQ
-type AnchorExecutionPayloadHeader struct {
-	FeeRecipient     bellatrix.ExecutionAddress `ssz-size:"20"`
-	StateRoot        [32]byte                   `ssz-size:"32"`
-	ReceiptsRoot     [32]byte                   `ssz-size:"32"`
-	LogsBloom        [256]byte                  `ssz-size:"256"`
-	BlockNumber      uint64
-	Timestamp        uint64
-	BlockHash        phase0.Hash32 `ssz-size:"32"`
-	TransactionsRoot phase0.Root   `ssz-size:"32"`
-	ChunkDigest      phase0.Root   `ssz-size:"32"`
-}
-
-func (r *SEQPayloadRequest) ToJSON() ([]byte, error) {
-	return json.Marshal(r)
-}
-
-// SEQHeaderRequest Deserialization
-func (r *SEQPayloadRequest) FromJSON(data []byte) error {
-	return json.Unmarshal(data, r)
-}
-
-// SEQHeaderResponse Serialization
-func (r *SEQPayloadResponse) ToJSON() ([]byte, error) {
-	return json.Marshal(r)
-}
-
-// SEQHeaderResponse Deserialization
-func (r *SEQPayloadResponse) FromJSON(data []byte) error {
-	return json.Unmarshal(data, r)
-}
-
-func (r *SEQHeaderRequest) ToJSON() ([]byte, error) {
-	return json.Marshal(r)
-}
-
-// SEQHeaderResponse Deserialization
-func (r *SEQHeaderResponse) FromJSON(data []byte) error {
-	return json.Unmarshal(data, r)
+type HTTPMessageResp struct {
+	Message string `json:"message"`
 }
 
 type ExecutionPayload struct {
@@ -213,7 +83,7 @@ type AnchorHeader struct {
 
 func NewAnchorGetHeaderResponse() *AnchorGetHeaderResponse {
 	return &AnchorGetHeaderResponse{
-		ExecHeaders: *NewExecPayloadsInfo(),
+		ExecHeaders: ExecHeadersInfo{},
 	}
 }
 
@@ -240,10 +110,15 @@ func (msg *AnchorGetHeaderResponse) IsEmpty() bool {
 // 	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
 // }
 
-func NewExecPayloadsInfo() *ExecHeadersInfo {
+func NewExecHeadersInfo() *ExecHeadersInfo {
 	return &ExecHeadersInfo{
 		RoBHashes: make(map[string]*AnchorHeader),
 	}
+}
+
+type ExecPayloadsInfo struct {
+	ToBPayload  *ExecutionPayload           `json:"tobpayload"`
+	RoBPayloads map[string]ExecutionPayload `json:"robpayloads"`
 }
 
 type AnchorGetHeaderResponse struct {
@@ -307,29 +182,25 @@ func (r *AnchorGetPayloadRequest) GetSignedHeaders() (*bls.Signature, error) {
 	return signature, nil
 }
 
-type ExecPayloadsInfo struct {
-	ToBPayload  *ExecutionPayload           `json:"tobpayload"`
-	RoBPayloads map[string]ExecutionPayload `json:"robpayloads"`
-}
-
-// Note ExecPayloadsSig is the execpayloads with Baton's private key. It is verified by Anchor.
 type AnchorGetPayloadResponse struct {
-	Slot            uint64           `json:"slot"`
-	ExecPayloads    ExecPayloadsInfo `json:"execpayloads"`
-	ExecPayloadsSig []byte           `json:"execpayloads_sig"`
+	Slot         uint64           `json:"slot"`
+	ExecPayloads ExecPayloadsInfo `json:"execpayloads"`
+
+	// ExecPayloadsSig is the execpayloads with Baton's private key. It is verified by Anchor.
+	ExecPayloadsSig []byte `json:"execpayloads_sig"`
 }
 
-func (r *AnchorGetPayloadResponse) GetExecPayloadsSig() (*bls.Signature, error) {
-	signature, err := bls.SignatureFromBytes(r.ExecPayloadsSig)
+func (msg *AnchorGetPayloadResponse) GetExecPayloadsSig() (*bls.Signature, error) {
+	signature, err := bls.SignatureFromBytes(msg.ExecPayloadsSig)
 	if err != nil {
 		return nil, errors.New("invalid signed headers, err: " + err.Error())
 	}
 	return signature, nil
 }
 
-func (r *AnchorGetPayloadResponse) SetExecPayloadsSig(sig *bls.Signature) {
+func (msg *AnchorGetPayloadResponse) SetExecPayloadsSig(sig *bls.Signature) {
 	signatureAsBytes := sig.Bytes()
-	r.ExecPayloadsSig = signatureAsBytes[:]
+	msg.ExecPayloadsSig = signatureAsBytes[:]
 }
 
 func (msg *AnchorGetPayloadResponse) IsEmpty() bool {
@@ -454,4 +325,14 @@ func hashExecPayloads(payloads *ExecPayloadsInfo) ([32]byte, error) {
 	// Use sha256 to hash the serialized ExecHeaders data
 	hash := sha256.Sum256(payloadBytes)
 	return hash, nil
+}
+
+func StrToParentHash(hash string) ids.ID {
+	var parentHash ids.ID
+	copy(parentHash[:], hash)
+	return parentHash
+}
+
+func ParentHashToStr(parentHash ids.ID) string {
+	return string(parentHash[:])
 }

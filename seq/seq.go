@@ -46,6 +46,8 @@ func NewSeqClient(signer ed25519.PrivateKey, uri string, networkID uint32, chain
 	}, nil
 }
 
+// GenerateSeqTxsFromEthRaws generates seq txs from eth raw txs
+// @TODO: Update this later so users can pay for transactions instead of the protocol covering the cost
 func (s *SeqClient) GenerateSeqTxsFromEthRaws(ctx context.Context, ethTxs []hexutil.Bytes) ([]*chain.Transaction, error) {
 	parser := s.parser
 

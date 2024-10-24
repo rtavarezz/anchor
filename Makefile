@@ -23,15 +23,15 @@ v:
 
 .PHONY: build
 build:
-	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o mev-boost
+	CGO_ENABLED=1 go build $(GO_BUILD_FLAGS) -o mev-boost
 
 .PHONY: build-testcli
 build-testcli:
-	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o test-cli ./cmd/test-cli
+	CGO_ENABLED=1 go build $(GO_BUILD_FLAGS) -o test-cli ./cmd/test-cli
 
 .PHONY: test
 test:
-	CGO_ENABLED=0 go test ./...
+	CGO_ENABLED=1 go test ./...
 
 .PHONY: test-race
 test-race:
@@ -56,18 +56,18 @@ fmt:
 
 .PHONY: test-coverage
 test-coverage:
-	CGO_ENABLED=0 go test -v -covermode=atomic -coverprofile=coverage.out ./...
+	CGO_ENABLED=1 go test -v -covermode=atomic -coverprofile=coverage.out ./...
 	go tool cover -func coverage.out
 
 .PHONY: cover
 cover:
-	CGO_ENABLED=0 go test -coverprofile=coverage.out ./...
+	CGO_ENABLED=1 go test -coverprofile=coverage.out ./...
 	go tool cover -func coverage.out
 	unlink coverage.out
 
 .PHONY: cover-html
 cover-html:
-	CGO_ENABLED=0 go test -coverprofile=coverage.out ./...
+	CGO_ENABLED=1 go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out
 	unlink coverage.out
 
