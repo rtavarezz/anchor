@@ -60,6 +60,10 @@ func (bid *OPBid) IsEmpty() bool {
 	return bid.Value == nil || bid.Payload == nil
 }
 
+type HTTPMessageResp struct {
+	Message string `json:"message"`
+}
+
 type ExecutionPayload struct {
 	// hypersdk transactions in byte slice format
 	Transactions []byte `json:"transactions"`

@@ -215,6 +215,7 @@ func (m *AnchorService) respondOK(w http.ResponseWriter, response any) {
 func (m *AnchorService) getRouter() http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/", m.handleRoot)
+	r.HandleFunc("/livez", m.handleLivez).Methods(http.MethodGet)
 
 	r.HandleFunc(pathStatus, m.handleStatus).Methods(http.MethodGet)
 	r.HandleFunc(pathRegisterValidator, m.handleRegisterValidator).Methods(http.MethodPost)
@@ -275,9 +276,9 @@ func (m *AnchorService) sendValidatorRegistrationsToRelayMonitors(payload []buil
 	log := m.log.WithField("method", "sendValidatorRegistrationsToRelayMonitors").WithField("numRegistrations", len(payload))
 	for _, relayMonitor := range m.relayMonitors {
 		go func(relayMonitor *url.URL) {
-			url := GetURI(relayMonitor, pathRegisterValidator)
-			log = log.WithField("url", url)
-			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, url, "", nil, payload, nil)
+			uri := GetURI(relayMonitor, pathRegisterValidator)
+			log = log.WithField("uri", uri)
+			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, uri, "", nil, payload, nil)
 			if err != nil {
 				log.WithError(err).Warn("error calling registerValidator on relay monitor")
 				return
@@ -305,6 +306,27 @@ func (m *AnchorService) sendValidatorRegistrationsToRelayMonitors(payload []buil
 
 func (m *AnchorService) handleRoot(w http.ResponseWriter, _ *http.Request) {
 	m.respondOK(w, nilResponse)
+}
+
+func (m *AnchorService) handleLivez(w http.ResponseWriter, _ *http.Request) {
+	m.respondMsg(w, http.StatusOK, "live")
+}
+
+func (m *AnchorService) respondMsg(w http.ResponseWriter, code int, msg string) {
+	m.respond(w, code, HTTPMessageResp{msg})
+}
+
+func (m *AnchorService) respond(w http.ResponseWriter, code int, response any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if response == nil {
+		return
+	}
+
+	// write the json response
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+	}
 }
 
 // handleStatus sends calls to the status endpoint of every relay.
@@ -339,10 +361,10 @@ func (m *AnchorService) handleRegisterValidator(w http.ResponseWriter, req *http
 
 	for _, relay := range m.relays {
 		go func(relay RelayEntry) {
-			url := relay.GetURI(pathRegisterValidator)
-			log := log.WithField("url", url)
+			uri := relay.GetURI(pathRegisterValidator)
+			log := log.WithField("uri", uri)
 
-			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, url, ua, nil, payload, nil)
+			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, uri, ua, nil, payload, nil)
 			relayRespCh <- err
 			if err != nil {
 				log.WithError(err).Warn("error calling registerValidator on relay")
@@ -437,11 +459,11 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		go func(relay RelayEntry) {
 			defer wg.Done()
 			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHash, pubkey)
-			url := relay.GetURI(path)
-			log := log.WithField("url", url)
+			uri := relay.GetURI(path)
+			log := log.WithField("uri", uri)
 
 			localResponse := new(AnchorGetHeaderResponse)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, localResponse)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, uri, ua, headers, nil, localResponse)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
@@ -739,8 +761,8 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 		// TODO: Since we know there is only a single Baton instance. We could probably cut out the goroutine.
 		go func(relay RelayEntry) {
 			defer wg.Done()
-			url := relay.GetURI(pathGetPayload)
-			log := log.WithField("url", url)
+			uri := relay.GetURI(pathGetPayload)
+			log := log.WithField("uri", uri)
 			log.Debug("calling getPayload")
 
 			localResult := NewAnchorGetPayloadResponse(uint64(0), true)
@@ -749,7 +771,7 @@ func (m *AnchorService) handleGetPayload(w http.ResponseWriter, req *http.Reques
 				requestCtx,
 				m.httpClientGetPayload,
 				http.MethodPost,
-				url,
+				uri,
 				ua,
 				headers,
 				payloadReq,
@@ -918,11 +940,11 @@ func (m *AnchorService) CheckRelays() int {
 
 		go func(relay RelayEntry) {
 			defer wg.Done()
-			url := relay.GetURI(pathStatus)
-			log := m.log.WithField("url", url)
+			uri := relay.GetURI(pathStatus)
+			log := m.log.WithField("uri", uri)
 			log.Debug("checking relay status")
 
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, "", nil, nil, nil)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, uri, "", nil, nil, nil)
 			if err != nil {
 				log.WithError(err).Error("relay status error - request failed")
 				return
@@ -964,7 +986,7 @@ func (*ServerParser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *AnchorService) ServerParser(ctx context.Context, networkID uint32, chainID ids.ID) chain.Parser {
+func (m *AnchorService) ServerParser(_ context.Context, networkID uint32, chainID ids.ID) chain.Parser {
 	// The only thing this is using is the ActionRegistry and AuthRegistry so this should be fine
 	return &Parser{networkID, chainID, nil}
 }
@@ -989,7 +1011,7 @@ func (*Parser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 	return seqconsts.ActionRegistry, seqconsts.AuthRegistry
 }
 
-func (m *AnchorService) Parser(ctx context.Context, networkID uint32, chainID ids.ID) (chain.Parser, error) {
+func (m *AnchorService) Parser(_ context.Context, networkID uint32, chainID ids.ID) (chain.Parser, error) {
 
 	return &Parser{networkID, chainID, nil}, nil
 }
