@@ -81,29 +81,6 @@ type AnchorHeader struct {
 	Value     *big.Int     `json:"value"`
 }
 
-func NewAnchorGetHeaderResponse() *AnchorGetHeaderResponse {
-	return &AnchorGetHeaderResponse{
-		ExecHeaders: ExecHeadersInfo{},
-	}
-}
-
-func (r *AnchorGetHeaderResponse) GetExecPayloadsSig() (*bls.Signature, error) {
-	signature, err := bls.SignatureFromBytes(r.ExecHeadersSig)
-	if err != nil {
-		return nil, errors.New("invalid exec headers sig, err: " + err.Error())
-	}
-	return signature, nil
-}
-
-func (r *AnchorGetHeaderResponse) SetExecPayloadsSig(sig *bls.Signature) {
-	signatureAsBytes := sig.Bytes()
-	r.ExecHeadersSig = signatureAsBytes[:]
-}
-
-func (msg *AnchorGetHeaderResponse) IsEmpty() bool {
-	return msg.ExecHeaders.ToBHash == nil && len(msg.ExecHeaders.RoBHashes) == 0
-}
-
 // type ExecHeadersInfo struct {
 // 	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
 // 	ToBHash   *AnchorHeader            `json:"tobhash"`
@@ -129,6 +106,29 @@ type AnchorGetHeaderResponse struct {
 	ExecHeadersSig []byte `json:"exec_headers_sig"`
 }
 
+func NewAnchorGetHeaderResponse() *AnchorGetHeaderResponse {
+	return &AnchorGetHeaderResponse{
+		ExecHeaders: ExecHeadersInfo{},
+	}
+}
+
+func (h *AnchorGetHeaderResponse) GetExecPayloadsSig() (*bls.Signature, error) {
+	signature, err := bls.SignatureFromBytes(h.ExecHeadersSig)
+	if err != nil {
+		return nil, errors.New("invalid exec headers sig, err: " + err.Error())
+	}
+	return signature, nil
+}
+
+func (h *AnchorGetHeaderResponse) SetExecPayloadsSig(sig *bls.Signature) {
+	signatureAsBytes := sig.Bytes()
+	h.ExecHeadersSig = signatureAsBytes[:]
+}
+
+func (h *AnchorGetHeaderResponse) IsEmpty() bool {
+	return h.ExecHeaders.ToBHash == nil && len(h.ExecHeaders.RoBHashes) == 0
+}
+
 func (h AnchorGetHeaderResponse) MarshalBinary() ([]byte, error) {
 	return json.Marshal(h)
 }
@@ -144,7 +144,7 @@ type AnchorBlockInfo struct {
 	ProposerPubkey []byte     `json:"proposer_pubkey"`
 }
 
-// SEQ validator should sign this
+// ExecHeadersInfo the headers info that SEQ validators should sign
 type ExecHeadersInfo struct {
 	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
 	ToBHash   *AnchorHeader            `json:"tobhash"`
