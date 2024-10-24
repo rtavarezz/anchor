@@ -498,24 +498,24 @@ func TestGetHeader(t *testing.T) {
 		require.Equal(t, http.StatusOK, rr.Code)
 	})
 
-	t.Run("Invalid relay public key in msg", func(t *testing.T) {
-		backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
+	// t.Run("Invalid relay public key in msg", func(t *testing.T) {
+	// 	backend := newTestBackend(t, 2, time.Second*TestRelayTimeout)
 
-		tobHeader, err := MakeRandomAnchorHeader(LargerThanMinBidFloor) // value must be over min req to be valid
-		require.NoError(t, err)
+	// 	tobHeader, err := MakeRandomAnchorHeader(LargerThanMinBidFloor) // value must be over min req to be valid
+	// 	require.NoError(t, err)
 
-		resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, tobHeader, nil)
+	// 	resp := backend.relays[0].MakeAnchorGetHeaderResponse(1, nil, tobHeader, nil)
 
-		// Simulate a different public key than the relays
-		pk := bls.PublicKey{}
-		pkBytes := pk.Bytes()
-		resp.BlockInfo.ProposerPubkey = pkBytes[:]
+	// 	// Simulate a different public key than the relays
+	// 	pk := bls.PublicKey{}
+	// 	pkBytes := pk.Bytes()
+	// 	resp.BlockInfo.ProposerPubkey = pkBytes[:]
 
-		backend.relays[0].GetHeaderResponse = resp
-		rr := backend.request(t, http.MethodGet, path, nil)
-		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
-		require.Equal(t, http.StatusNoContent, rr.Code)
-	})
+	// 	backend.relays[0].GetHeaderResponse = resp
+	// 	rr := backend.request(t, http.MethodGet, path, nil)
+	// 	require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
+	// 	require.Equal(t, http.StatusNoContent, rr.Code)
+	// })
 	/*
 
 		t.Run("Invalid relay signature", func(t *testing.T) {

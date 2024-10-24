@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +22,6 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/hypersdk/chain"
-	"github.com/AnomalyFi/hypersdk/crypto/ed25519"
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
 	"github.com/AnomalyFi/anchor/config"
@@ -140,24 +138,24 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 		return nil, err
 	}
 
-	seqSiginingKeyBytes, err := hex.DecodeString(config.SeqSigningKey)
-	if err != nil {
-		return nil, err
-	}
-	seqSigningKey := ed25519.PrivateKey(seqSiginingKeyBytes)
-	seqChainID, err := ids.FromString(config.SeqChainID)
-	if err != nil {
-		return nil, err
-	}
+	// seqSiginingKeyBytes, err := hex.DecodeString(config.SeqSigningKey)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// seqSigningKey := ed25519.PrivateKey(seqSiginingKeyBytes)
+	// seqChainID, err := ids.FromString(config.SeqChainID)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	// only enable this at mock mode, seq isn't a dependecy of Anchor
-	var seqCli *seq.SeqClient = nil
-	if opts.MockMode {
-		seqCli, err = seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
-		if err != nil {
-			return nil, err
-		}
-	}
+	// var seqCli *seq.SeqClient = nil
+	// if opts.MockMode {
+	// 	seqCli, err = seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
 	return &AnchorService{
 		listenAddr:    opts.ListenAddr,
@@ -190,7 +188,7 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 		requestMaxRetries: opts.RequestMaxRetries,
 		mockMode:          opts.MockMode,
 
-		seqCli: seqCli,
+		// seqCli: seqCli,
 	}, nil
 }
 
