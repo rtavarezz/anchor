@@ -6,12 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	builderApi "github.com/attestantio/go-builder-client/api"
-	"github.com/attestantio/go-eth2-client/spec"
-	core "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/flashbots/go-boost-utils/bls"
-	"golang.org/x/exp/rand"
 	"io"
 	"log"
 	"math/big"
@@ -19,6 +13,13 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	builderApi "github.com/attestantio/go-builder-client/api"
+	"github.com/attestantio/go-eth2-client/spec"
+	core "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/flashbots/go-boost-utils/bls"
+	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/anchor/config"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
@@ -54,7 +55,8 @@ func SendHTTPRequest(
 	userAgent UserAgent,
 	headers map[string]string,
 	payload,
-	dst any) (code int, err error) {
+	dst any,
+) (code int, err error) {
 	var req *http.Request
 
 	if payload == nil {
@@ -288,11 +290,10 @@ func CreateRandomTransaction(nonce uint64) hexutil.Bytes {
 	value := big.NewInt(int64(rand.Intn(101)))
 	gasLimit := rand.Intn(101)
 	gasPrice := big.NewInt(int64(rand.Intn(101)))
-	call := CreateTransactionAsTxBytes(nonce, *value, uint64(gasLimit), *gasPrice, data)
-	return call
+	return CreateTransactionAsTxBytes(nonce, *value, uint64(gasLimit), *gasPrice, data)
 }
 
-func CreateRandomTransactions(nonce uint64, numTxs uint64) []hexutil.Bytes {
+func CreateRandomTransactions(nonce, numTxs uint64) []hexutil.Bytes {
 	var list []hexutil.Bytes
 	for i := 0; i < int(numTxs); i = i + 1 {
 		tx := CreateRandomTransaction(nonce + uint64(i))

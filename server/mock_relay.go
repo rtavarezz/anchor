@@ -387,7 +387,6 @@ func (m *mockRelay) MakeAnchorGetHeaderResponse(
 	tobHeader *AnchorHeader,
 	robHeaders *map[string]*AnchorHeader,
 ) *AnchorGetHeaderResponse {
-
 	skBytes, err := hexutil.Decode(mockRelaySecretKeyHex)
 	if err != nil {
 		panic(err)

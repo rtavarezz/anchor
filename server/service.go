@@ -25,7 +25,6 @@ import (
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
 	"github.com/AnomalyFi/anchor/config"
-	"github.com/AnomalyFi/anchor/seq"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	eth2ApiV1Bellatrix "github.com/attestantio/go-eth2-client/api/v1/bellatrix"
@@ -119,7 +118,7 @@ type AnchorService struct {
 
 	// SEQ client
 	// not created when mock mode enabled
-	seqCli *seq.SeqClient
+	// seqCli *seq.SeqClient
 }
 
 // go program calls this on boot up automatically
@@ -224,8 +223,8 @@ func (m *AnchorService) getRouter() http.Handler {
 	r.HandleFunc(pathGetPayload, m.handleGetPayload).Methods(http.MethodPost)
 
 	// These are mock handlers for the SEQ-Anchor interface. This will be stubbed in for now.
-	//r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
-	//r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
+	// r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
+	// r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
 
 	r.Use(mux.CORSMethodMiddleware(r))
 	loggedRouter := httplogger.LoggingMiddlewareLogrus(m.log, r)
@@ -1019,6 +1018,5 @@ func (*Parser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 }
 
 func (m *AnchorService) Parser(_ context.Context, networkID uint32, chainID ids.ID) (chain.Parser, error) {
-
 	return &Parser{networkID, chainID, nil}, nil
 }

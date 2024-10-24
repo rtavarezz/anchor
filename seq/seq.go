@@ -166,10 +166,5 @@ func (s *SeqClient) GenerateTransferTx(ctx context.Context, asset ids.ID, to cod
 		MaxFee:    maxFee,
 	}
 	tx := chain.NewTx(base, []chain.Action{act})
-	tx, err = tx.Sign(authFactory, actionRegistry, authRegistry)
-	if err != nil {
-		return nil, err
-	}
-	return tx, nil
-
+	return tx.Sign(authFactory, actionRegistry, authRegistry)
 }
