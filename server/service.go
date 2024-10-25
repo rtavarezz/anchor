@@ -467,7 +467,7 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 			log := log.WithField("url", url)
 
 			localResponse := new(AnchorGetHeaderResponse)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, uri, ua, headers, nil, localResponse)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, localResponse)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
