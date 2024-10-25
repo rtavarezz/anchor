@@ -5,14 +5,20 @@ volumes:
 
 services:
   anchor:
-    build: 
+    build:
       context: .
     ports:
       - "$RPC_PORT:18550"
-    entrypoint: 
+    entrypoint:
       - "/app/mev-boost"
       - "-mainnet"
     environment:
       - "LOG_LEVEL=debug"
       - "BOOST_LISTEN_ADDR=0.0.0.0:18550"
       - "RELAYS=$RELAYS" # scheme://pubkey@host,scheme://pb2@host2, e.g. http://0xtest@baton.url:8080,...
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"
+        loki-external-labels: "container_name={{.Name}}"
+
