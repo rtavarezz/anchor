@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,17 +15,16 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 
 	seqconsts "github.com/AnomalyFi/nodekit-seq/consts"
 	"github.com/ava-labs/avalanchego/ids"
 	"golang.org/x/exp/rand"
 
 	"github.com/AnomalyFi/hypersdk/chain"
-	"github.com/AnomalyFi/hypersdk/crypto/ed25519"
 	"github.com/AnomalyFi/nodekit-seq/genesis"
 
 	"github.com/AnomalyFi/anchor/config"
-	"github.com/AnomalyFi/anchor/seq"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	eth2ApiV1Bellatrix "github.com/attestantio/go-eth2-client/api/v1/bellatrix"
@@ -120,7 +118,7 @@ type AnchorService struct {
 
 	// SEQ client
 	// not created when mock mode enabled
-	seqCli *seq.SeqClient
+	// seqCli *seq.SeqClient
 }
 
 // go program calls this on boot up automatically
@@ -139,23 +137,24 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 		return nil, err
 	}
 
-	seqSiginingKeyBytes, err := hex.DecodeString(config.SeqSigningKey)
-	if err != nil {
-		return nil, err
-	}
-	seqSigningKey := ed25519.PrivateKey(seqSiginingKeyBytes)
-	seqChainID, err := ids.FromString(config.SeqChainID)
-	if err != nil {
-		return nil, err
-	}
+	// seqSiginingKeyBytes, err := hex.DecodeString(config.SeqSigningKey)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// seqSigningKey := ed25519.PrivateKey(seqSiginingKeyBytes)
+	// seqChainID, err := ids.FromString(config.SeqChainID)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	var seqCli *seq.SeqClient
-	if !opts.MockMode {
-		seqCli, err = seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
-		if err != nil {
-			return nil, err
-		}
-	}
+	// only enable this at mock mode, seq isn't a dependecy of Anchor
+	// var seqCli *seq.SeqClient = nil
+	// if opts.MockMode {
+	// 	seqCli, err = seq.NewSeqClient(seqSigningKey, config.SeqURI, uint32(config.SeqNetworkID), seqChainID)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
 	return &AnchorService{
 		listenAddr:    opts.ListenAddr,
@@ -188,7 +187,7 @@ func NewAnchorService(opts AnchorServiceOpts) (*AnchorService, error) {
 		requestMaxRetries: opts.RequestMaxRetries,
 		mockMode:          opts.MockMode,
 
-		seqCli: seqCli,
+		// seqCli: seqCli,
 	}, nil
 }
 
@@ -224,8 +223,8 @@ func (m *AnchorService) getRouter() http.Handler {
 	r.HandleFunc(pathGetPayload, m.handleGetPayload).Methods(http.MethodPost)
 
 	// These are mock handlers for the SEQ-Anchor interface. This will be stubbed in for now.
-	//r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
-	//r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
+	// r.HandleFunc(pathGetHeader2, m.handleGetHeader2).Methods(http.MethodGet)
+	// r.HandleFunc(pathGetPayload2, m.handleGetPayload2).Methods(http.MethodPost)
 
 	r.Use(mux.CORSMethodMiddleware(r))
 	loggedRouter := httplogger.LoggingMiddlewareLogrus(m.log, r)
@@ -390,18 +389,17 @@ func (m *AnchorService) handleRegisterValidator(w http.ResponseWriter, req *http
 func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	slot := vars["slot"]
-	parentHash := vars["parent_hash"]
+	parentHashStr := vars["parent_hash"]
 	pubkey := vars["pubkey"]
 
 	ua := UserAgent(req.Header.Get("User-Agent"))
 	log := m.log.WithFields(logrus.Fields{
 		"method":     "getHeader",
 		"slot":       slot,
-		"parentHash": parentHash,
+		"parentHash": parentHashStr,
 		"pubkey":     pubkey,
 		"ua":         ua,
 	})
-	log.Debug("getHeader")
 
 	_slot, err := strconv.ParseUint(slot, 10, 64)
 	if err != nil {
@@ -409,12 +407,18 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	if len(pubkey) != 98 {
+	pkBytes, err := hexutil.Decode(pubkey)
+	if err != nil {
+		m.respondError(w, http.StatusBadRequest, fmt.Sprintf("unable to decode pubkey as hex: %s", err))
+		return
+	}
+
+	if len(pkBytes) != 48 {
 		m.respondError(w, http.StatusBadRequest, errInvalidPubkey.Error())
 		return
 	}
 
-	if len(parentHash) > 66 {
+	if _, err := ids.FromString(parentHashStr); err != nil {
 		m.respondError(w, http.StatusBadRequest, errInvalidHash.Error())
 		return
 	}
@@ -458,12 +462,12 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 		// TODO: Since we know there is only a single Baton instance. We could probably cut out the goroutine.
 		go func(relay RelayEntry) {
 			defer wg.Done()
-			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHash, pubkey)
-			uri := relay.GetURI(path)
-			log := log.WithField("uri", uri)
+			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashStr, pubkey)
+			url := relay.GetURI(path)
+			log := log.WithField("url", url)
 
 			localResponse := new(AnchorGetHeaderResponse)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, uri, ua, headers, nil, localResponse)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, localResponse)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
@@ -502,13 +506,15 @@ func (m *AnchorService) handleGetHeader(w http.ResponseWriter, req *http.Request
 				"rob_values": robValues,
 			})
 
+			// TODO(added by chan): this following won't work as proposerPubkey belongs to SEQ
 			// TODO: Add proposer pub key to Baton responses
-			relayPubKey := relay.PublicKey
-			reqPubKey := localResponse.BlockInfo.ProposerPubkey.Bytes()
-			if relayPubKey != reqPubKey {
-				log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), localResponse.BlockInfo.ProposerPubkey.String())
-				return
-			}
+			// relayPubKey := relay.PublicKey
+			// reqPubKey := batonResponse.BlockInfo.ProposerPubkey.Bytes()
+			// if relayPubKey != reqPubKey {
+			// 	log.Errorf("bid pubkey mismatch. expected: %s - got: %s", relay.PublicKey.String(), batonResponse.BlockInfo.ProposerPubkey.String())
+			// 	w.WriteHeader(http.StatusBadRequest)
+			// 	return
+			// }
 
 			// The below checks that the message came from Baton by verifying message signature against Baton's public key.
 			if !config.SkipRelaySignatureCheck {
@@ -1012,6 +1018,5 @@ func (*Parser) Registry() (chain.ActionRegistry, chain.AuthRegistry) {
 }
 
 func (m *AnchorService) Parser(_ context.Context, networkID uint32, chainID ids.ID) (chain.Parser, error) {
-
 	return &Parser{networkID, chainID, nil}, nil
 }

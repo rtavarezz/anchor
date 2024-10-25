@@ -81,11 +81,11 @@ type AnchorHeader struct {
 	Value     *big.Int     `json:"value"`
 }
 
-type ExecHeadersInfo struct {
-	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
-	ToBHash   *AnchorHeader            `json:"tobhash"`
-	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
-}
+// type ExecHeadersInfo struct {
+// 	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
+// 	ToBHash   *AnchorHeader            `json:"tobhash"`
+// 	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
+// }
 
 func NewExecHeadersInfo() *ExecHeadersInfo {
 	return &ExecHeadersInfo{
@@ -108,37 +108,63 @@ type AnchorGetHeaderResponse struct {
 
 func NewAnchorGetHeaderResponse() *AnchorGetHeaderResponse {
 	return &AnchorGetHeaderResponse{
-		ExecHeaders: *NewExecHeadersInfo(),
+		ExecHeaders: ExecHeadersInfo{},
 	}
 }
 
-func (msg *AnchorGetHeaderResponse) GetExecPayloadsSig() (*bls.Signature, error) {
-	signature, err := bls.SignatureFromBytes(msg.ExecHeadersSig)
+func (h *AnchorGetHeaderResponse) GetExecPayloadsSig() (*bls.Signature, error) {
+	signature, err := bls.SignatureFromBytes(h.ExecHeadersSig)
 	if err != nil {
 		return nil, errors.New("invalid exec headers sig, err: " + err.Error())
 	}
 	return signature, nil
 }
 
-func (msg *AnchorGetHeaderResponse) SetExecPayloadsSig(sig *bls.Signature) {
+func (h *AnchorGetHeaderResponse) SetExecPayloadsSig(sig *bls.Signature) {
 	signatureAsBytes := sig.Bytes()
-	msg.ExecHeadersSig = signatureAsBytes[:]
+	h.ExecHeadersSig = signatureAsBytes[:]
 }
 
-func (msg *AnchorGetHeaderResponse) IsEmpty() bool {
-	return msg.ExecHeaders.ToBHash == nil && len(msg.ExecHeaders.RoBHashes) == 0
+func (h *AnchorGetHeaderResponse) IsEmpty() bool {
+	return h.ExecHeaders.ToBHash == nil && len(h.ExecHeaders.RoBHashes) == 0
 }
 
-func (msg *AnchorGetHeaderResponse) ParentHashAsStr() string {
-	return ParentHashToStr(msg.ParentHash)
+func (h AnchorGetHeaderResponse) MarshalBinary() ([]byte, error) {
+	return json.Marshal(h)
+}
+
+func (h *AnchorGetHeaderResponse) UnmarshalBinary(data []byte) error {
+	return json.Unmarshal(data, h)
 }
 
 type AnchorBlockInfo struct {
 	Slot uint64 `json:"slot"`
 	// nodeID of chunk producing validator.
-	Producer       ids.NodeID    `json:"producer"`
-	ProposerPubkey bls.PublicKey `json:"proposer_pubkey"`
+	Producer       ids.NodeID `json:"producer"`
+	ProposerPubkey []byte     `json:"proposer_pubkey"`
 }
+
+// ExecHeadersInfo the headers info that SEQ validators should sign
+type ExecHeadersInfo struct {
+	// Make signature based off ToBHash + RoBHashes then we use this signature for Baton/Anchor to check against
+	ToBHash   *AnchorHeader            `json:"tobhash"`
+	RoBHashes map[string]*AnchorHeader `json:"robhashes"`
+}
+
+// type AnchorGetHeaderResponse struct {
+// 	ExecHeaders ExecHeadersInfo `json:"exec_headers"`
+// 	BlockInfo   AnchorBlockInfo `json:"block_info"`
+// 	ParentHash  ids.ID          `json:"parent_hash"`
+// 	// Exec headers signed by baton's key.
+// 	ExecHeadersSig []byte `json:"exec_headers_sig"`
+// }
+
+// type AnchorBlockInfo struct {
+// 	Slot uint64 `json:"slot"`
+// 	// nodeID of chunk producing validator.
+// 	Producer       ids.NodeID    `json:"producer"`
+// 	ProposerPubkey bls.PublicKey `json:"proposer_pubkey"`
+// }
 
 type AnchorGetPayloadRequest struct {
 	Slot           uint64 `json:"slot"`

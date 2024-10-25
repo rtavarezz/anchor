@@ -350,11 +350,25 @@ func MakeRandomAnchorGetHeaderResponse(slot uint64) *AnchorGetHeaderResponse {
 		RoBHashes: robHashes,
 	}
 
+	skBytes, err := hexutil.Decode(mockRelaySecretKeyHex)
+	if err != nil {
+		panic(err)
+	}
+	sk, err := bls.SecretKeyFromBytes(skBytes)
+	if err != nil {
+		panic(err)
+	}
+	pk, err := bls.PublicKeyFromSecretKey(sk)
+	if err != nil {
+		panic(err)
+	}
+	pkBytes := pk.Bytes()
+
 	anchorBlockInfo := AnchorBlockInfo{
 		Slot: slot,
 		// nodeID of chunk producing validator.
 		Producer:       ids.NodeID{1},
-		ProposerPubkey: *mockRelayPublicKey,
+		ProposerPubkey: pkBytes[:],
 	}
 
 	resp := AnchorGetHeaderResponse{
@@ -373,9 +387,23 @@ func (m *mockRelay) MakeAnchorGetHeaderResponse(
 	tobHeader *AnchorHeader,
 	robHeaders *map[string]*AnchorHeader,
 ) *AnchorGetHeaderResponse {
+	skBytes, err := hexutil.Decode(mockRelaySecretKeyHex)
+	if err != nil {
+		panic(err)
+	}
+	sk, err := bls.SecretKeyFromBytes(skBytes)
+	if err != nil {
+		panic(err)
+	}
+	pk, err := bls.PublicKeyFromSecretKey(sk)
+	if err != nil {
+		panic(err)
+	}
+	pkBytes := pk.Bytes()
+
 	resp := NewAnchorGetHeaderResponse()
 	resp.BlockInfo.Slot = slot
-	resp.BlockInfo.ProposerPubkey = *mockRelayPublicKey
+	resp.BlockInfo.ProposerPubkey = pkBytes[:]
 
 	// if headersHash != nil {
 	// 	resp.HeadersHash = *headersHash

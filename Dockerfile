@@ -9,7 +9,8 @@ COPY go.sum ./
 RUN go mod download
 
 ADD . .
-RUN --mount=type=cache,target=/root/.cache/go-build GOOS=linux go build -trimpath -ldflags "-w -s -X cmd.Version=$VERSION -X main.Version=$VERSION" -v -o mev-boost .
+# RUN --mount=type=cache,target=/root/.cache/go-build GOOS=linux go build -trimpath -ldflags "-w -s -X cmd.Version=$VERSION -X main.Version=$VERSION" -v -o mev-boost .
+RUN --mount=type=cache,target=/root/.cache/go-build GOOS=linux go build -trimpath -ldflags "-s -X cmd.Version=$VERSION -X main.Version=$VERSION -linkmode external -extldflags '-static'" -v -o mev-boost .
 # RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=linux go build \
 #     -trimpath \
 #     -v \
@@ -17,6 +18,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build GOOS=linux go build -trimpat
 #     -o mev-boost .
 
 FROM alpine
+RUN apk add --no-cache libstdc++ libc6-compat
 WORKDIR /app
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /build/mev-boost /app/mev-boost

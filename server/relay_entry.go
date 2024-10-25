@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/flashbots/go-boost-utils/bls"
 	_ "github.com/flashbots/go-boost-utils/utils"
 )
 
@@ -44,10 +47,16 @@ func NewRelayEntry(relayURL string) (entry RelayEntry, err error) {
 	//}
 
 	// Convert the username string to a public key.
-	//entry.PublicKey, err = utils.HexToPubkey(entry.URL.User.Username())
-	//if err != nil {
-	//	return entry, err
-	//}
+	batonPubkeyHex := entry.URL.User.Username()
+	log.Debug("baton pubkey hex", "hex", batonPubkeyHex)
+	batonPubkeyBytes, err := hexutil.Decode(batonPubkeyHex)
+	if err != nil {
+		return entry, err
+	}
+	if _, err := bls.PublicKeyFromBytes(batonPubkeyBytes); err != nil {
+		return entry, err
+	}
+	copy(entry.PublicKey[:], batonPubkeyBytes)
 
 	// Check if the public key is the point-at-infinity.
 	//if bytes.Equal(entry.PublicKey[:], pointAtInfinityPubkey[:]) {
