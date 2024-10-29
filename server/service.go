@@ -308,7 +308,7 @@ func (m *AnchorService) handleRoot(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (m *AnchorService) handleLivez(w http.ResponseWriter, _ *http.Request) {
-	m.respondMsg(w, http.StatusOK, "live")
+	w.WriteHeader(http.StatusOK)
 }
 
 func (m *AnchorService) respondMsg(w http.ResponseWriter, code int, msg string) {
