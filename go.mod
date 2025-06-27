@@ -3,7 +3,7 @@ module github.com/AnomalyFi/anchor
 go 1.23
 
 require (
-	github.com/AnomalyFi/hypersdk v0.9.6
+	github.com/AnomalyFi/hypersdk v0.9.7
 	github.com/AnomalyFi/nodekit-seq v0.9.16
 	github.com/ava-labs/avalanchego v1.11.10
 	github.com/ethereum/go-ethereum v1.13.15
@@ -15,7 +15,6 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e
-
 )
 
 require (
