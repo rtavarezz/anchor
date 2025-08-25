@@ -13,9 +13,8 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/holiman/uint256 v1.2.4
 	github.com/sirupsen/logrus v1.9.3
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.11.0
 	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e
-
 )
 
 require (
